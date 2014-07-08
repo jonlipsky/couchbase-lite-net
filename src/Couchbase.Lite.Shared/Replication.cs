@@ -148,7 +148,7 @@ namespace Couchbase.Lite
                 {
                     var email = PersonaAuthorizer.RegisterAssertion(personaAssertion);
                     var authorizer = new PersonaAuthorizer(email);
-                    Authorizer = authorizer;
+                    Authenticator = authorizer;
                 }
 
                 var facebookAccessToken = URIUtils.GetQueryParameter(uri, FacebookAuthorizer.QueryParameter);
@@ -170,7 +170,7 @@ namespace Couchbase.Lite
 
                     FacebookAuthorizer.RegisterAccessToken(facebookAccessToken, email, remoteWithQueryRemoved.ToString());
 
-                    Authorizer = authorizer;
+                    Authenticator = authorizer;
                 }
                 // we need to remove the query from the URL, since it will cause problems when
                 // communicating with sync gw / couchdb
@@ -222,7 +222,7 @@ namespace Couchbase.Lite
         protected internal Boolean lastSequenceChanged;
 
         private String lastSequence;
-        protected internal String  LastSequence 
+        protected internal String LastSequence 
         {
             get { return lastSequence; }
             set 
@@ -257,7 +257,16 @@ namespace Couchbase.Lite
         protected internal Int32 asyncTaskCount;
         protected internal Boolean active;
 
-        internal Authorizer Authorizer { get; set; }
+        internal IAuthenticator Authenticator { get; set; }
+
+        internal CookieContainer CookieContainer 
+        { 
+            get 
+            { 
+                return clientFactory.GetCookieContainer();
+            } 
+        }
+
         internal Batcher<RevisionInternal> Batcher { get; set; }
         private CancellationTokenSource CancellationTokenSource { get; set; }
         private CancellationTokenSource RetryIfReadyTokenSource { get; set; }
@@ -297,11 +306,21 @@ namespace Couchbase.Lite
                 } 
                 else 
                 {
-                    this.clientFactory = new CouchbaseLiteHttpClientFactory();
+                    CookieStore cookieStore = null;
+                    if (manager != null)
+                    {
+                        cookieStore = manager.SharedCookieStore;
+                    }
+
+                    if (cookieStore == null)
+                    {
+                        cookieStore = new CookieStore();
+                    }
+
+                    this.clientFactory = new CouchbaseLiteHttpClientFactory(cookieStore);
                 }
             }
         }
-
 
         void NotifyChangeListeners ()
         {
@@ -421,7 +440,7 @@ namespace Couchbase.Lite
 
         internal void CheckSession()
         {
-            if (Authorizer != null && Authorizer.UsesCookieBasedLogin)
+            if (Authenticator != null && Authenticator.UsesCookieBasedLogin)
             {
                 CheckSessionAtPath("/_session");
             }
@@ -473,16 +492,16 @@ namespace Couchbase.Lite
 
         protected internal virtual void Login()
         {
-            var loginParameters = Authorizer.LoginParametersForSite(RemoteUrl);
+            var loginParameters = Authenticator.LoginParametersForSite(RemoteUrl);
             if (loginParameters == null)
             {
-                Log.D(Tag, String.Format("{0}: {1} has no login parameters, so skipping login", this, Authorizer));
+                Log.D(Tag, String.Format("{0}: {1} has no login parameters, so skipping login", this, Authenticator));
                 FetchRemoteCheckpointDoc();
                 return;
             }
 
-            var loginPath = Authorizer.LoginPathForSite(RemoteUrl);
-            Log.D(Tag, string.Format("{0}: Doing login with {1} at {2}", this, Authorizer.GetType(), loginPath));
+            var loginPath = Authenticator.LoginPathForSite(RemoteUrl);
+            Log.D(Tag, string.Format("{0}: Doing login with {1} at {2}", this, Authenticator.GetType(), loginPath));
 
             Log.D(Tag, string.Format("{0} | {1} : login() calling asyncTaskStarted()", this, Sharpen.Thread.CurrentThread()));
             AsyncTaskStarted();
@@ -1517,6 +1536,33 @@ namespace Couchbase.Lite
             Start();
         }
 
+        public void SetCookie(string name, string value, string path, DateTime expirationDate, bool secure, bool httpOnly)
+        {
+            var cookie = new Cookie(name, value);
+            cookie.Expires = expirationDate;
+            cookie.Secure = secure;
+            cookie.HttpOnly = httpOnly;
+            cookie.Domain = RemoteUrl.GetHost();
+
+            if (!string.IsNullOrEmpty(path))
+            {
+                cookie.Path = path;
+            }
+            else
+            {
+                cookie.Path = RemoteUrl.PathAndQuery;
+            }
+
+            var cookies = new CookieCollection();
+            cookies.Add(cookie);
+            clientFactory.AddCookies(cookies);
+        }
+
+        public void DeleteCookie(String name)
+        {
+            clientFactory.DeleteCookie(RemoteUrl, name);
+        }
+
         /// <summary>
         /// Adds or Removed a <see cref="Couchbase.Lite.Database"/> change delegate 
         /// that will be called whenever the <see cref="Couchbase.Lite.Replication"/> 
@@ -1525,7 +1571,7 @@ namespace Couchbase.Lite
         public event EventHandler<ReplicationChangeEventArgs> Changed;
     }
     #endregion
-    
+
     #region EventArgs Subclasses
 
         ///

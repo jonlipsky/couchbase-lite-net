@@ -42,16 +42,19 @@
 
 using System;
 using System.Net.Http;
-using System.Collections;
 using System.Collections.Generic;
+using System.Net;
 
 namespace Couchbase.Lite.Support
 {
     public interface IHttpClientFactory
     {
-        HttpClient GetHttpClient();
-        HttpClientHandler HttpHandler { get; }
+        HttpClient GetHttpClient(ICredentials credentials = null);
         IDictionary<string,string> Headers { get; set; }
+
+        void AddCookies(CookieCollection cookies);
+        void DeleteCookie(Uri domain, string name);
+        CookieContainer GetCookieContainer();
     }
 }
 

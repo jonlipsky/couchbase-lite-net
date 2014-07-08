@@ -115,6 +115,17 @@ namespace Couchbase.Lite
 
             return new NetworkCredential(userAndPassword[0], userAndPassword[1], request.RequestUri.DnsSafeHost);
         }
+
+        public static ICredentials ToCredentialsFromUserInfoString(this string userinfo)
+        {
+            Debug.Assert(userinfo != null);
+
+            var userAndPassword = userinfo.Split(new[] { ':' }, 2, StringSplitOptions.None);
+            if (userAndPassword.Length != 2)
+                return null;
+
+            return new NetworkCredential(userAndPassword[0], userAndPassword[1]);
+        }
     }
 }
 

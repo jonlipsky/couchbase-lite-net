@@ -40,13 +40,14 @@
 // and limitations under the License.
 //
 
-using Couchbase.Lite.Support;
-using System.Net.Http;
-using System.Net;
 using System;
-using Couchbase.Lite.Replicator;
-using System.Collections.Generic;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Net;
+using System.Net.Http;
+using Couchbase.Lite.Replicator;
+using Couchbase.Lite.Support;
+using Couchbase.Lite.Util;
 
 namespace Couchbase.Lite.Support
 {
@@ -54,35 +55,29 @@ namespace Couchbase.Lite.Support
 	{
         const string Tag = "CouchbaseLiteHttpClientFactory";
 
-        public static CouchbaseLiteHttpClientFactory Instance;
+        private readonly CookieStore cookieStore;
+        private readonly Object locker = new Object();
 
-        static CouchbaseLiteHttpClientFactory()
+        public CouchbaseLiteHttpClientFactory(CookieStore cookieStore)
         {
-            Instance = new CouchbaseLiteHttpClientFactory();
-        }
-
-        private readonly CookieContainer cookieStore;
-        private readonly Object locker = new Object ();
-        private HttpClientHandler handler;
-
-        public CouchbaseLiteHttpClientFactory()
-        {
-            cookieStore = new CookieContainer ();
+            this.cookieStore = cookieStore;
             Headers = new ConcurrentDictionary<string,string>();
         }
 
-		public HttpClient GetHttpClient()
+        public HttpClient GetHttpClient(ICredentials credentials = null)
 		{
             // Build a pipeline of HttpMessageHandlers.
-            var clientHandler = new HttpClientHandler 
+            var handler = new HttpClientHandler 
             {
                 CookieContainer = cookieStore,
-                UseDefaultCredentials = true,               
+                UseDefaultCredentials = true,
+                UseCookies = true,
+                Credentials = credentials
             };
 
             // NOTE: Probably could set httpHandler.MaxRequestContentBufferSize to Couchbase Lite 
             // max doc size (~16 MB) plus some overhead.
-            var authHandler = new DefaultAuthHandler(clientHandler);
+            var authHandler = new DefaultAuthHandler(handler, cookieStore);
             var client =  new HttpClient(authHandler);
             foreach(var header in Headers)
             {
@@ -90,22 +85,26 @@ namespace Couchbase.Lite.Support
                 if (!success)
                     Util.Log.W(Tag, "Unabled to add header to request: {0}: {1}".Fmt(header.Key, header.Value));
             }
+
             return client;
 		}
 
-        public HttpClientHandler HttpHandler {
-            get {
-                return handler;
-            }
-        }
-
-        public void AddCookies(CookieCollection cookies)
-		{
-            lock (locker) {
-                cookieStore.Add(cookies);
-            }
-		}
 
         public IDictionary<string, string> Headers { get; set; }
+
+        public void AddCookies(CookieCollection cookies)
+        {
+            cookieStore.Add(cookies);
+        }
+
+        public void DeleteCookie(Uri uri, string name)
+        {
+            cookieStore.Delete(uri, name);
+        }
+
+        public CookieContainer GetCookieContainer()
+        {
+            return cookieStore;
+        }
 	}
 }

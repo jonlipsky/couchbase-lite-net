@@ -1,10 +1,10 @@
-//
-// AlwaysFailingClientFactory.cs
+﻿//
+// Authenticator.cs
 //
 // Author:
-//     Zachary Gramana  <zack@xamarin.com>
+//     Pasin Suriyentrakorn  <pasin@couchbase.com>
 //
-// Copyright (c) 2014 Xamarin Inc
+// Copyright (c) 2014 Couchbase Inc
 // Copyright (c) 2014 .NET Foundation
 //
 // Permission is hereby granted, free of charge, to any person obtaining
@@ -41,46 +41,19 @@
 //
 
 using System;
-using System.Net;
-using System.Net.Http;
 using System.Collections.Generic;
-using Couchbase.Lite.Support;
-using Couchbase.Lite.Replicator;
 
-namespace Couchbase.Lite.Tests
-{
-    public class AlwaysFailingClientFactory : IHttpClientFactory
-    {
-		public IDictionary<string, string> Headers { get; set; }
-
-        public HttpClientHandler HttpHandler { get ; set; }
-
-        public AlwaysFailingClientFactory()
-        {
-			Headers = new Dictionary<string,string>();
-            HttpHandler = new FailEveryRequestHandler();
-        }
-
-        public HttpClient GetHttpClient(ICredentials credentials = null)
-        {
-            var mockHttpClient = new HttpClient(HttpHandler);
-            return mockHttpClient;
-        }
-
-        public void AddCookies(System.Net.CookieCollection cookies)
-        {
-            throw new NotImplementedException();
-        }
-
-        public void DeleteCookie(Uri domain, string name)
-        {
-            throw new NotImplementedException();
-        }
-
-        public CookieContainer GetCookieContainer()
-        {
-            throw new NotImplementedException();
-        }
-    }
-}
-
+//namespace Couchbase.Lite.Auth
+//{
+//    public abstract class Authenticator : IAuthenticator
+//    {
+//        public virtual string AuthUserInfo { get { return null; } }
+//
+//        public abstract bool UsesCookieBasedLogin { get; }
+//
+//        public abstract string LoginPathForSite(Uri site);
+//
+//        public abstract IDictionary<string, string> LoginParametersForSite(Uri site);
+//    }
+//}
+//
