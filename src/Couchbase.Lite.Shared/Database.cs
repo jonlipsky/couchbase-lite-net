@@ -3634,7 +3634,7 @@ PRAGMA user_version = 3;";
                                                              BadAttachment);
                         }
 
-                        var revPos = ((int)attachInfo.Get("revpos"));
+						var revPos = Convert.ToInt32(attachInfo.Get("revpos"));
                         if (revPos <= 0)
                         {
                             throw new CouchbaseLiteException("Invalid revpos: " + revPos, StatusCode.BadAttachment
