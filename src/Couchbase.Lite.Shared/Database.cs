@@ -2046,7 +2046,7 @@ PRAGMA user_version = 3;";
 
         internal void RemoveDocumentFromCache(Document document)
         {
-            DocumentCache.Remove(document.Id);
+            DocumentCache.Evict(document.Id);
         }
 
         internal BlobStoreWriter AttachmentWriter { get { return new BlobStoreWriter(Attachments); } }
