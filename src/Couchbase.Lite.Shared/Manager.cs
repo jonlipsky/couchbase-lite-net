@@ -61,12 +61,13 @@ namespace Couchbase.Lite
     /// <summary>
     /// The top-level object that manages Couchbase Lite <see cref="Couchbase.Lite.Database"/>s.
     /// </summary>
-    public partial class Manager
+    public sealed partial class Manager
     {
 
     #region Constants
 
-        const string VersionString = "1.0.0-beta2";
+        const string VersionString = "1.0.0-beta3";
+        const string Tag = "Manager";
 
         /// <summary>
         /// The error domain used for HTTP status codes.
@@ -131,15 +132,16 @@ namespace Couchbase.Lite
         /// <summary>
         /// Initializes a Manager that stores Databases in the given directory.
         /// </summary>
-        /// <param name="directoryFile">The directory to use for storing <see cref="Couchbase.Lite.Database"/>s.</param>
+        /// <param name="context"><see cref="Couchbase.Lite.IContext"/> object for initializing the Manager object.</param>
         /// <param name="options">Option flags for initialization.</param>
         /// <exception cref="T:System.IO.DirectoryNotFoundException">Thrown when there is an error while accessing or creating the given directory.</exception>
-        public Manager(DirectoryInfo directoryFile, ManagerOptions options)
+        public Manager(DirectoryInfo directoryFile, ManagerOptions options, INetworkReachabilityManager networkReachabilityManager = null)
         {
-            Log.V(Database.Tag, "Starting Manager version: " + VersionString);
+            Log.I(Tag, "Starting Manager version: " + VersionString);
 
             this.directoryFile = directoryFile;
             this.options = options ?? DefaultOptions;
+            this.NetworkReachabilityManager = networkReachabilityManager;
             this.databases = new Dictionary<string, Database>();
             this.replications = new AList<Replication>();
 
@@ -159,7 +161,7 @@ namespace Couchbase.Lite
             var scheduler = options.CallbackScheduler;
             CapturedContext = new TaskFactory(scheduler);
             workExecutor = new TaskFactory(new SingleThreadTaskScheduler());
-            Log.D("Manager", "New replication uses a scheduler with a max concurrency level of {0}".Fmt(workExecutor.Scheduler.MaximumConcurrencyLevel));
+            Log.D(Tag, "New replication uses a scheduler with a max concurrency level of {0}".Fmt(workExecutor.Scheduler.MaximumConcurrencyLevel));
 
             SharedCookieStore = new CookieStore(this.directoryFile);
         }
@@ -173,6 +175,8 @@ namespace Couchbase.Lite
         /// </summary>
         /// <value>The directory.</value>
         public String Directory { get { return directoryFile.FullName; } }
+
+        public INetworkReachabilityManager NetworkReachabilityManager { get ; private set; }
 
         /// <summary>
         /// Gets the names of all existing <see cref="Couchbase.Lite.Database"/>s.

@@ -41,20 +41,19 @@
 //
 
 using System;
-using System.Linq;
 using System.Collections.Generic;
-using System.IO;
-using Sharpen;
-using Couchbase.Lite.Util;
-using Couchbase.Lite.Storage;
-using Couchbase.Lite.Internal;
-using System.Threading.Tasks;
-using System.Text;
-using System.Diagnostics;
 using System.Data;
-using Couchbase.Lite.Replicator;
-using Couchbase.Lite.Support;
+using System.Diagnostics;
+using System.IO;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
 using Newtonsoft.Json.Linq;
+using Couchbase.Lite.Internal;
+using Couchbase.Lite.Replicator;
+using Couchbase.Lite.Storage;
+using Couchbase.Lite.Util;
+using Sharpen;
 
 namespace Couchbase.Lite 
 {
@@ -83,7 +82,8 @@ namespace Couchbase.Lite
             Name = FileDirUtils.GetDatabaseNameFromPath(path);
             Manager = manager;
             DocumentCache = new LruCache<string, Document>(MaxDocCacheSize);
-
+            UnsavedRevisionDocumentCache = new Dictionary<string, WeakReference>();
+ 
             // TODO: Make Synchronized ICollection
             ActiveReplicators = new HashSet<Replication>();
             AllReplicators = new HashSet<Replication>();
@@ -341,15 +341,13 @@ namespace Couchbase.Lite
                 return null;
             }
 
-            var doc = DocumentCache.Get(id);
+            var unsavedDoc = UnsavedRevisionDocumentCache.Get(id);
+            Document doc = unsavedDoc != null ? (Document)unsavedDoc.Target : DocumentCache.Get(id);
             if (doc == null)
             {
                 doc = new Document(this, id);
-                if (doc == null)
-                {
-                    return null;
-                }
                 DocumentCache[id] = doc;
+                UnsavedRevisionDocumentCache[id] = new WeakReference(doc);
             }
 
             return doc;
@@ -777,8 +775,9 @@ PRAGMA user_version = 3;";
         internal String                                 Path { get; private set; }
         internal ICollection<Replication>               ActiveReplicators { get; set; }
         internal ICollection<Replication>               AllReplicators { get; set; }
-        internal ISQLiteStorageEngine                    StorageEngine { get; set; }
+        internal ISQLiteStorageEngine                   StorageEngine { get; set; }
         internal LruCache<String, Document>             DocumentCache { get; set; }
+        internal IDictionary<String, WeakReference>     UnsavedRevisionDocumentCache { get; set; }
 
         //TODO: Should thid be a public member?
 
@@ -1302,6 +1301,33 @@ PRAGMA user_version = 3;";
             {
                 Log.E(Tag, "Error getting last sequence", e);
                 return null;
+            }
+            finally
+            {
+                if (cursor != null)
+                {
+                    cursor.Close();
+                }
+            }
+            return result;
+        }
+
+        internal String LastSequenceWithCheckpointId(string checkpointId)
+        {
+            Cursor cursor = null;
+            string result = null;
+            try
+            {
+                var args = new [] { checkpointId };
+                cursor = StorageEngine.RawQuery("SELECT last_sequence FROM replicators WHERE remote=?", args);
+                if (cursor.MoveToNext())
+                {
+                    result = cursor.GetString(0);
+                }
+            }
+            catch (SQLException e)
+            {
+                Log.E(Tag, "Error getting last sequence", e);
             }
             finally
             {
@@ -2021,6 +2047,7 @@ PRAGMA user_version = 3;";
         internal void RemoveDocumentFromCache(Document document)
         {
             DocumentCache.Remove(document.Id);
+            UnsavedRevisionDocumentCache.Remove(document.Id);
         }
 
         internal BlobStoreWriter AttachmentWriter { get { return new BlobStoreWriter(Attachments); } }
@@ -2214,7 +2241,7 @@ PRAGMA user_version = 3;";
 
                 ++transactionLevel;
 
-                Log.I(Tag, " Begin transaction (level " + transactionLevel + ")");
+                Log.D(Tag, "Begin transaction (level " + transactionLevel + ")");
             }
             catch (SQLException e)
             {
@@ -2234,7 +2261,7 @@ PRAGMA user_version = 3;";
 
             if (commit)
             {
-                Log.I(Tag, "Committing transaction (level " + transactionLevel + ")");
+                Log.D(Tag, "Committing transaction (level " + transactionLevel + ")");
 
                 StorageEngine.SetTransactionSuccessful();
                 StorageEngine.EndTransaction();
@@ -2709,15 +2736,21 @@ PRAGMA user_version = 3;";
         }
 
         /// <summary>Parses the _revisions dict from a document into an array of revision ID strings.</summary>
-        internal static IList<String> ParseCouchDBRevisionHistory(IDictionary<String, Object> docProperties)
+        internal static IList<string> ParseCouchDBRevisionHistory(IDictionary<String, Object> docProperties)
         {
             var revs = (JObject)docProperties.Get("_revisions");
             var revisions = revs.ToObject<Dictionary<String, Object>>();
             if (revisions == null)
             {
-                return null;
+                return new List<string>();
             }
+
             var ids = (JArray)revisions["ids"];
+            if (ids == null || ids.Count == 0)
+            {
+                return new List<string>();
+            }
+
             var revIDs = ids.Values<String>().ToList();
             var start = (Int64)revisions.Get("start");
             for (var i = 0; i < revIDs.Count; i++)
@@ -2725,6 +2758,7 @@ PRAGMA user_version = 3;";
                 var revID = revIDs[i];
                 revIDs.Set(i, Sharpen.Extensions.ToString(start--) + "-" + revID);
             }
+
             return revIDs;
         }
 
@@ -3084,8 +3118,9 @@ PRAGMA user_version = 3;";
                 // Bump the revID and update the JSON:
                 var newRevId = GenerateNextRevisionID(prevRevId);
                 IEnumerable<byte> data = null;
-                if (!oldRev.IsDeleted())
-                {
+
+
+                if(oldRev.GetProperties() != null && oldRev.GetProperties().Any()) {
                     data = EncodeDocumentJSON(oldRev);
                     if (data == null)
                     {
@@ -3137,7 +3172,10 @@ PRAGMA user_version = 3;";
                     cursor.Close();
                 }
                 EndTransaction(resultStatus.IsSuccessful());
+
+                UnsavedRevisionDocumentCache.Remove(docId);
             }
+
             // EPILOGUE: A change notification is sent...
             NotifyChange(newRev, winningRev, null, inConflict);
             return newRev;
@@ -3262,7 +3300,7 @@ PRAGMA user_version = 3;";
                 }
                 catch (Exception e)
                 {
-                    Log.E(Tag, this + " got exception posting change notifications", e);
+                    Log.E(Tag, " got exception posting change notifications", e);
                 }
                 finally
                 {
@@ -3761,12 +3799,14 @@ PRAGMA user_version = 3;";
             return GetDocumentWithIDAndRev(docId, revId, EnumSet.Of(TDContentOptions.TDNoBody)) != null;
         }
 
-        internal bool FindMissingRevisions(RevisionList touchRevs)
+        internal Int32 FindMissingRevisions(RevisionList touchRevs)
         {
+            var numRevisionsRemoved = 0;
             if (touchRevs.Count == 0)
             {
-                return true;
+                return numRevisionsRemoved;
             }
+
             var quotedDocIds = JoinQuoted(touchRevs.GetAllDocIds());
             var quotedRevIds = JoinQuoted(touchRevs.GetAllRevIds());
             var sql = "SELECT docid, revid FROM revs, docs " + "WHERE docid IN (" + quotedDocIds
@@ -3782,14 +3822,10 @@ PRAGMA user_version = 3;";
                     if (rev != null)
                     {
                         touchRevs.Remove(rev);
+                        numRevisionsRemoved += 1;
                     }
                     cursor.MoveToNext();
                 }
-            }
-            catch (SQLException e)
-            {
-                Log.E(Tag, "Error finding missing revisions", e);
-                return false;
             }
             finally
             {
@@ -3798,7 +3834,7 @@ PRAGMA user_version = 3;";
                     cursor.Close();
                 }
             }
-            return true;
+            return numRevisionsRemoved;
         }
 
         /// <summary>DOCUMENT & REV IDS:</summary>

@@ -229,7 +229,7 @@ namespace Couchbase.Lite
             {
                 if (value != null && !value.Equals(lastSequence))
                 {
-                    Log.V(Tag, this + ": Setting lastSequence to " + value + " from( " + lastSequence + ")");
+                    Log.V(Tag, "Setting lastSequence to " + value + " from( " + lastSequence + ")");
                     lastSequence = value;
 
                     if (!lastSequenceChanged)
@@ -279,6 +279,8 @@ namespace Couchbase.Lite
         private Int32 revisionsFailed;
 
         readonly object asyncTaskLocker = new object ();
+
+        private EventHandler<NetworkReachabilityChangeEventArgs> networkReachabilityEventHandler;
 
         protected void SetClientFactory(IHttpClientFactory clientFactory)
         {
@@ -343,11 +345,16 @@ namespace Couchbase.Lite
                 return false;
             }
 
+            if (LocalDatabase == null)
+            {
+                return false;
+            }
+
             LocalDatabase.Manager.RunAsync(() =>
             {
-                Log.D(Tag, this + ": Going offline");
+                Log.D(Tag, "Going offline");
                 online = false;
-
+            
                 StopRemoteRequests();
 
                 UpdateProgress();
@@ -365,9 +372,14 @@ namespace Couchbase.Lite
                 return false;
             }
 
+            if (LocalDatabase == null)
+            {
+                return false;
+            }
+
             LocalDatabase.Manager.RunAsync(() =>
             {
-                Log.D(Tag, this + ": Going online");
+                Log.D(Tag, "Going online");
                 online = true;
                 if (IsRunning)
                 {
@@ -384,7 +396,12 @@ namespace Couchbase.Lite
 
         internal void StopRemoteRequests()
         {
-            var remoteRequests = new List<HttpClient>(requests);
+            IList<HttpClient> remoteRequests;
+            lock(requests)
+            {
+                remoteRequests = new List<HttpClient>(requests);
+            }
+
             foreach(var client in remoteRequests)
             {
                 client.CancelPendingRequests();
@@ -453,7 +470,7 @@ namespace Couchbase.Lite
 
         internal void CheckSessionAtPath(string sessionPath)
         {
-            Log.D(Tag, this + "|" + Sharpen.Thread.CurrentThread() + ": checkSessionAtPath() calling asyncTaskStarted()");
+            Log.D(Tag, "checkSessionAtPath() calling asyncTaskStarted()");
             AsyncTaskStarted();
             SendAsyncRequest(HttpMethod.Get, sessionPath, null, (result, e) => {
                 try
@@ -465,7 +482,7 @@ namespace Couchbase.Lite
                             CheckSessionAtPath ("_session");
                             return;
                         }
-                        Log.E(Tag, this + ": Session check failed", e);
+                        Log.E(Tag, "Session check failed", e);
                         LastError = e;
                     }
                     else
@@ -485,7 +502,7 @@ namespace Couchbase.Lite
                 }
                 finally
                 {
-                    Log.D(Tag, this + "|" + Sharpen.Thread.CurrentThread() + ": checkSessionAtPath() calling asyncTaskFinished()");
+                    Log.D(Tag, "checkSessionAtPath() calling asyncTaskFinished()");
                     AsyncTaskFinished (1);
                 }
             });
@@ -522,7 +539,7 @@ namespace Couchbase.Lite
                 }
                 finally
                 {
-                    Log.D(Tag, this + "|" + Sharpen.Thread.CurrentThread() + ": login() calling asyncTaskFinished()");
+                    Log.D(Tag, "login() calling asyncTaskFinished()");
                     AsyncTaskFinished (1);
                 }
             });
@@ -532,18 +549,18 @@ namespace Couchbase.Lite
         {
             lastSequenceChanged = false;
             var localLastSequence = LocalDatabase.LastSequenceWithRemoteURL(RemoteUrl, !IsPull);
-            Log.D(Tag, this + "|" + Sharpen.Thread.CurrentThread() + ": fetchRemoteCheckpointDoc() calling asyncTaskStarted()");
+            Log.D(Tag, "fetchRemoteCheckpointDoc() calling asyncTaskStarted()");
             AsyncTaskStarted();
             var checkpointId = RemoteCheckpointDocID();
             SendAsyncRequest(HttpMethod.Get, "/_local/" + checkpointId, null, (response, e) => {
                 try
                 {
                     if (e != null && !Is404 (e)) {
-                        Log.D (Tag, this + " error getting remote checkpoint: " + e);
+                        Log.D (Tag, " error getting remote checkpoint: " + e);
                         SetLastError(e);
                     } else {
                         if (e != null && Is404 (e)) {
-                            Log.D (Tag, this + " 404 error getting remote checkpoint " + RemoteCheckpointDocID () + ", calling maybeCreateRemoteDB");
+                            Log.D (Tag, " 404 error getting remote checkpoint " + RemoteCheckpointDocID () + ", calling maybeCreateRemoteDB");
                             MaybeCreateRemoteDB ();
                         }
 
@@ -563,9 +580,9 @@ namespace Couchbase.Lite
 
                         if (remoteLastSequence != null && remoteLastSequence.Equals (localLastSequence)) {
                             LastSequence = localLastSequence;
-                            Log.V (Tag, this + ": Replicating from lastSequence=" + LastSequence);
+                            Log.V (Tag, "Replicating from lastSequence=" + LastSequence);
                         } else {
-                            Log.V (Tag, this + ": lastSequence mismatch: I had " + localLastSequence + ", remote had " + remoteLastSequence);
+                            Log.V (Tag, "lastSequence mismatch: I had " + localLastSequence + ", remote had " + remoteLastSequence);
                         }
 
                         BeginReplicating ();
@@ -602,7 +619,7 @@ namespace Couchbase.Lite
         {   // TODO.ZJG: Replace lock with Interlocked.CompareExchange.
             lock (asyncTaskLocker)
             {
-                Log.D(Tag, this + "|" + Sharpen.Thread.CurrentThread() + ": asyncTaskStarted() called, asyncTaskCount: " + asyncTaskCount);
+                Log.D(Tag, "asyncTaskStarted() called, asyncTaskCount: " + asyncTaskCount);
                 if (asyncTaskCount++ == 0)
                 {
                     UpdateActive();
@@ -619,7 +636,7 @@ namespace Couchbase.Lite
 
             lock (asyncTaskLocker)
             {
-                Log.D(Tag, this + "|" + Sharpen.Thread.CurrentThread() + ": asyncTaskFinished() called, asyncTaskCount: " + asyncTaskCount);
+                Log.D(Tag, "asyncTaskFinished() called, asyncTaskCount: " + asyncTaskCount);
                 asyncTaskCount -= numTasks;
                 System.Diagnostics.Debug.Assert(asyncTaskCount >= 0);
                 if (asyncTaskCount == 0)
@@ -640,13 +657,13 @@ namespace Couchbase.Lite
                 }
                 else
                 {
-                    Log.W(Tag, this + ": batcher object is null");
+                    Log.W(Tag, "batcher object is null");
                 }
 
                 var newActive = batcherCount > 0 || asyncTaskCount > 0;
                 if (active != newActive)
                 {
-                    Log.D(Tag, this + " Progress: set active = " + newActive + " asyncTaskCount: " + asyncTaskCount + " batcherCount: " + batcherCount );
+                    Log.D(Tag, "Progress: set active = " + newActive + " asyncTaskCount: " + asyncTaskCount + " batcherCount: " + batcherCount );
                     active = newActive;
                     NotifyChangeListeners();
 
@@ -654,7 +671,7 @@ namespace Couchbase.Lite
                     {
                         if (!continuous)
                         {
-                            Log.D(Tag, this + " since !continuous, calling stopped()");
+                            Log.D(Tag, "since !continuous, calling stopped()");
                             Stopped();
                         }
                         else if (LastError != null) /*(revisionsFailed > 0)*/
@@ -676,15 +693,32 @@ namespace Couchbase.Lite
 
         internal virtual void Stopped()
         {
-            Log.V(Tag, ToString() + " STOPPING");
+            Log.V(Tag, "STOPPING");
+
+            Log.V(Tag, this + " Stopped() called");
+
             IsRunning = false;
-            completedChangesCount = changesCount = 0;
+
             NotifyChangeListeners();
+
             SaveLastSequence();
-            Log.V(Tag, this + " set batcher to null");
+
+            Log.V(Tag, "set batcher to null");
+
             Batcher = null;
+
+            if (LocalDatabase != null)
+            {
+                var reachabilityManager = LocalDatabase.Manager.NetworkReachabilityManager;
+                if (reachabilityManager != null)
+                {
+                    reachabilityManager.Changed -= networkReachabilityEventHandler;
+                }
+            }
+
             ClearDbRef();
-            Log.V(Tag, ToString() + " STOPPED");
+
+            Log.V(Tag, "STOPPED");
         }
 
         internal void SaveLastSequence()
@@ -704,7 +738,7 @@ namespace Couchbase.Lite
             lastSequenceChanged = false;
             overdueForSave = false;
 
-            Log.D(Tag, this + " saveLastSequence() called. lastSequence: " + LastSequence);
+            Log.D(Tag, "saveLastSequence() called. lastSequence: " + LastSequence);
 
             var body = new Dictionary<String, Object>();
             if (remoteCheckpoint != null)
@@ -715,22 +749,22 @@ namespace Couchbase.Lite
             var remoteCheckpointDocID = RemoteCheckpointDocID();
             if (String.IsNullOrEmpty(remoteCheckpointDocID))
             {
-                Log.W(Tag, this + ": remoteCheckpointDocID is null, aborting saveLastSequence()");
+                Log.W(Tag, "remoteCheckpointDocID is null, aborting saveLastSequence()");
                 return;
             }
 
             savingCheckpoint = true;
-            //Log.D(Tag, this + " put remote _local document.  checkpointID: " + remoteCheckpointDocID);
+            //Log.D(Tag, "put remote _local document.  checkpointID: " + remoteCheckpointDocID);
             SendAsyncRequest(HttpMethod.Put, "/_local/" + remoteCheckpointDocID, body, (result, e) => {
                 savingCheckpoint = false;
                 if (e != null)
                 {
-                    Log.V (Tag, this + ": Unable to save remote checkpoint", e);
+                    Log.V (Tag, "Unable to save remote checkpoint", e);
                 }
 
                 if (LocalDatabase == null)
                 {
-                    Log.W(Tag, this + ": Database is null, ignoring remote checkpoint response");
+                    Log.W(Tag, "Database is null, ignoring remote checkpoint response");
                     return;
                 }
 
@@ -818,13 +852,22 @@ namespace Couchbase.Lite
             }
             message.Headers.Add("Accept", new[] { "multipart/related", "application/json" });
 
-            ICredentials credentials = AuthUtils.GetCredentialsIfAvailable (Authenticator, message);
-            var client = clientFactory.GetHttpClient(credentials);
+            var client = clientFactory.GetHttpClient();
+
+            var authHeader = AuthUtils.GetAuthenticationHeaderValue(Authenticator, message.RequestUri);
+            if (authHeader != null)
+            {
+                client.DefaultRequestHeaders.Authorization = authHeader;
+            }
 
             client.SendAsync(message, HttpCompletionOption.ResponseHeadersRead, CancellationTokenSource.Token)
                 .ContinueWith(response =>
                 {
-                    requests.Remove(client);
+                    lock(requests)
+                    {
+                        requests.Remove(client);
+                    }
+
                     if (completionHandler != null)
                     {
                         Exception error = null;
@@ -872,7 +915,10 @@ namespace Couchbase.Lite
                     return response.Result;
                 }, CancellationTokenSource.Token, TaskContinuationOptions.None, WorkExecutor.Scheduler);
 
-            requests.Add(client);
+            lock(requests)
+            {
+                requests.Add(client);
+            }
         }
 
         private void AddRequestHeaders(HttpRequestMessage request)
@@ -894,8 +940,13 @@ namespace Couchbase.Lite
                 message.Headers.Add("Accept", "*/*");
                 AddRequestHeaders(message);
 
-                ICredentials credentials = AuthUtils.GetCredentialsIfAvailable (Authenticator, message);
-                var client = clientFactory.GetHttpClient(credentials);
+                var client = clientFactory.GetHttpClient();
+
+                var authHeader = AuthUtils.GetAuthenticationHeaderValue(Authenticator, message.RequestUri);
+                if (authHeader != null)
+                {
+                    client.DefaultRequestHeaders.Authorization = authHeader;
+                }
 
                 client.SendAsync(message, HttpCompletionOption.ResponseHeadersRead, CancellationTokenSource.Token).ContinueWith(new Action<Task<HttpResponseMessage>>(responseMessage =>
                 {
@@ -1032,8 +1083,13 @@ namespace Couchbase.Lite
             message.Content = multiPartEntity;
             message.Headers.Add("Accept", "*/*");
 
-            ICredentials credentials = AuthUtils.GetCredentialsIfAvailable (Authenticator, message);
-            var client = clientFactory.GetHttpClient(credentials);
+            var client = clientFactory.GetHttpClient();
+
+            var authHeader = AuthUtils.GetAuthenticationHeaderValue(Authenticator, message.RequestUri);
+            if (authHeader != null)
+            {
+                client.DefaultRequestHeaders.Authorization = authHeader;
+            }
 
             client.SendAsync(message, HttpCompletionOption.ResponseHeadersRead, CancellationTokenSource.Token)
                 .ContinueWith(response=> {
@@ -1137,7 +1193,7 @@ namespace Couchbase.Lite
 
         internal void RefreshRemoteCheckpointDoc()
         {
-            Log.D(Tag, this + ": Refreshing remote checkpoint to get its _rev...");
+            Log.D(Tag, "Refreshing remote checkpoint to get its _rev...");
             savingCheckpoint = true;
             AsyncTaskStarted();
 
@@ -1147,7 +1203,7 @@ namespace Couchbase.Lite
                 {
                     if (LocalDatabase == null)
                     {
-                        Log.W(Tag, this + ": db == null while refreshing remote checkpoint.  aborting");
+                        Log.W(Tag, "db == null while refreshing remote checkpoint.  aborting");
                         return;
                     }
 
@@ -1155,11 +1211,11 @@ namespace Couchbase.Lite
 
                     if (e != null && GetStatusFromError(e) != StatusCode.NotFound)
                     {
-                        Log.E(Tag, this + ": Error refreshing remote checkpoint", e);
+                        Log.E(Tag, "Error refreshing remote checkpoint", e);
                     }
                     else
                     {
-                        Log.D(Tag, this + ": Refreshed remote checkpoint: " + result);
+                        Log.D(Tag, "Refreshed remote checkpoint: " + result);
                         remoteCheckpoint = (IDictionary<string, object>)result;
                         lastSequenceChanged = true;
                         SaveLastSequence();
@@ -1201,7 +1257,7 @@ namespace Couchbase.Lite
 
             if (online)
             {
-                Log.D(Tag, this + " RETRYING, to transfer missed revisions...");
+                Log.D(Tag, "RETRYING, to transfer missed revisions...");
                 revisionsFailed = 0;
                 CancelPendingRetryIfReady();
                 Retry();
@@ -1389,6 +1445,8 @@ namespace Couchbase.Lite
         public Int32 CompletedChangesCount {
             get { return completedChangesCount; }
             protected set {
+                System.Diagnostics.Debug.Assert(value > 0);
+                Log.V(Tag, "Updating completedChanges count from " + completedChangesCount + " -> " + value);
                 completedChangesCount = value;
                 NotifyChangeListeners();
             }
@@ -1401,6 +1459,8 @@ namespace Couchbase.Lite
         public Int32 ChangesCount {
             get { return changesCount; }
             protected set {
+                System.Diagnostics.Debug.Assert(value > 0);
+                Log.V(Tag, "Updating changes count from " + changesCount + " -> " + value);
                 changesCount = value;
                 NotifyChangeListeners();
             }
@@ -1437,10 +1497,27 @@ namespace Couchbase.Lite
             LocalDatabase.AddReplication(this);
             LocalDatabase.AddActiveReplication(this);
             sessionID = string.Format("repl{0:000}", ++lastSessionID);
-            Log.V(Tag, this + ": STARTING ...");
+            Log.V(Tag, "STARTING ...");
             IsRunning = true;
             LastSequence = null;
             CheckSession();
+
+            var reachabilityManager = LocalDatabase.Manager.NetworkReachabilityManager;
+            if (reachabilityManager != null)
+            {
+                networkReachabilityEventHandler = (sender, e) =>
+                {
+                    if (e.Status == NetworkReachabilityStatus.Reachable)
+                    {
+                        GoOnline();
+                    }
+                    else
+                    {
+                        GoOffline();
+                    }
+                };
+                reachabilityManager.Changed += networkReachabilityEventHandler;
+            }
         }
 
         /// <summary>
@@ -1453,7 +1530,7 @@ namespace Couchbase.Lite
                 return;
             }
 
-            Log.V(Tag, this + ": STOPPING...");
+            Log.V(Tag, "STOPPING...");
             Batcher.Clear(); // no sense processing any pending changes
             continuous = false;
             StopRemoteRequests();
@@ -1462,12 +1539,12 @@ namespace Couchbase.Lite
 
             if (IsRunning && asyncTaskCount <= 0)
             {
-                Log.V(Tag, this + ": calling stopped()");
+                Log.V(Tag, "calling stopped()");
                 Stopped();
             }
             else
             {
-                Log.V(Tag, this + ": not calling stopped().  running: " + IsRunning + " asyncTaskCount: " + asyncTaskCount);
+                Log.V(Tag, "not calling stopped().  running: " + IsRunning + " asyncTaskCount: " + asyncTaskCount);
             }
         }
 
