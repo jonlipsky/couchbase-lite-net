@@ -54,6 +54,33 @@ namespace Couchbase.Lite
 {
     public class DatabaseTest : LiteTestCase
     {
+        const String TooLongName = "a11111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111110";
+
+        [Test]
+        public void TestValidDatabaseNames([Values("foo", "try1", "foo-bar", "goofball99", TooLongName)] String testName)
+        {
+            // Arrange.
+            // Act.
+            if (testName.Length == 240) {
+                testName = testName.Trim('0');
+            }
+            var result = Manager.IsValidDatabaseName(testName);
+
+            // Assert.
+            Assert.IsTrue(result);
+        }
+
+        [Test]
+        public void TestInvalidDatabaseNames([Values("Foo", "1database", "", "foo;", TooLongName)] String testName)
+        {
+            // Arrange.
+            // Act.
+            var result = Manager.IsValidDatabaseName(testName);
+
+            // Assert.
+            Assert.IsFalse(result);
+        }
+
         [Test]
         public void TestPruneRevsToMaxDepth()
         {
@@ -155,7 +182,7 @@ namespace Couchbase.Lite
         /// for each insert (no batching)
         /// </summary>
         [Test]
-        public async void TestGetActiveReplications()
+        public void TestGetActiveReplications()
         {
             var remote = GetReplicationURL();
             var replication = database.CreatePullReplication(remote);
@@ -179,7 +206,7 @@ namespace Couchbase.Lite
                     };
                     return doneSignal.Wait(TimeSpan.FromSeconds(30));
                 });
-            var failed = await replicateTask;
+            var failed = replicateTask.Result;
             Assert.True(failed);
             Assert.AreEqual(1, database.AllReplications.ToList().Count);
             Assert.AreEqual(0, database.ActiveReplicators.Count);
