@@ -41,15 +41,9 @@
 //
 
 using System;
-using System.Linq;
-using System.Collections;
-using System.Collections.Generic;
-using System.Net;
-using System.IO;
 using System.Threading.Tasks;
 using System.Threading;
 using Couchbase.Lite.Util;
-using Sharpen;
 
 namespace Couchbase.Lite
 {
@@ -58,7 +52,7 @@ namespace Couchbase.Lite
     /// automatically refreshes every time the <see cref="Couchbase.Lite.Database"/> changes 
     /// in a way that would affect the results.
     /// </summary>
-    public partial class LiveQuery : Query
+    public sealed class LiveQuery : Query
     {
     #region Non-public Members
 
@@ -82,7 +76,7 @@ namespace Couchbase.Lite
         private CancellationTokenSource ReRunUpdateQueryTokenSource;
         private readonly object updateLock = new object();
 
-        private void OnDatabaseChanged (object sender, Database.DatabaseChangeEventArgs e)
+        private void OnDatabaseChanged (object sender, DatabaseChangeEventArgs e)
         {
             Log.D(Tag, "OnDatabaseChanged() called");
             Update();

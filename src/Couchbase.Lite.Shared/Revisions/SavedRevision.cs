@@ -41,15 +41,10 @@
 //
 
 using System;
-using System.Linq;
-using System.Collections;
 using System.Collections.Generic;
-using System.Net;
-using System.IO;
 using Couchbase.Lite.Internal;
 using Sharpen;
 using Couchbase.Lite.Util;
-using System.Dynamic;
 
 namespace Couchbase.Lite {
     /// <summary>
@@ -90,7 +85,7 @@ namespace Couchbase.Lite {
         {
             try
             {
-                var loadRevision = Database.LoadRevisionBody(RevisionInternal, EnumSet.NoneOf<TDContentOptions>());
+                var loadRevision = Database.LoadRevisionBody(RevisionInternal, DocumentContentOptions.None);
                 if (loadRevision == null)
                 {
                     Log.W(Database.Tag, "Couldn't load body/sequence of {0}" + this);
@@ -105,6 +100,11 @@ namespace Couchbase.Lite {
             }
         }
 
+
+        public string ParentRevisionID {
+            get;
+            set;
+        }
     #endregion
 
     #region Instance Members
@@ -142,7 +142,7 @@ namespace Couchbase.Lite {
         /// <exception cref="Couchbase.Lite.CouchbaseLiteException"></exception>
         public override IEnumerable<SavedRevision> RevisionHistory {
             get {
-                var revisions = new AList<SavedRevision>();
+                var revisions = new List<SavedRevision>();
                 var internalRevisions = Database.GetRevisionHistory(RevisionInternal);
 
                 foreach (var internalRevision in internalRevisions)

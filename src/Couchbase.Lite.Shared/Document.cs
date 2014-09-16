@@ -41,23 +41,20 @@
 //
 
 using System;
-using System.Linq;
-using System.Collections;
 using System.Collections.Generic;
-using System.Net;
-using System.IO;
-using Couchbase.Lite.Util;
-using Couchbase.Lite.Internal;
-using Sharpen;
 using System.Diagnostics;
+using System.Linq;
 using System.Text;
+using Couchbase.Lite.Internal;
+using Couchbase.Lite.Util;
+using Sharpen;
 
 namespace Couchbase.Lite {
 
     /// <summary>
     /// A Couchbase Lite Document.
     /// </summary>
-    public partial class Document {
+    public sealed class Document {
 
         SavedRevision currentRevision;
             
@@ -92,7 +89,7 @@ namespace Couchbase.Lite {
         /// Gets if the <see cref="Couchbase.Lite.Document"/> is deleted.
         /// </summary>
         /// <value><c>true</c> if deleted; otherwise, <c>false</c>.</value>
-        public Boolean Deleted { get { return CurrentRevision.IsDeletion; } }
+        public Boolean Deleted { get { return CurrentRevision == null && LeafRevisions.Any (); } }
 
         /// <summary>
         /// If known, gets the Id of the current <see cref="Couchbase.Lite.Revision"/>, otherwise null.
@@ -185,7 +182,7 @@ namespace Couchbase.Lite {
         /// The properties of the current <see cref="Couchbase.Lite.Revision"/> of 
         /// the <see cref="Couchbase.Lite.Document"/>
         /// </value>
-        public IDictionary<String, Object> Properties { get { return CurrentRevision.Properties; } }
+        public IDictionary<String, Object> Properties { get { return CurrentRevision != null ? CurrentRevision.Properties : null; } }
 
         /// <summary>
         /// Gets the properties of the current <see cref="Couchbase.Lite.Revision"/> of the 
@@ -201,7 +198,7 @@ namespace Couchbase.Lite {
         /// <see cref="Couchbase.Lite.Document"/> without any properties 
         /// with keys prefixed with '_'.
         /// </value>
-        public IDictionary<String, Object> UserProperties { get { return CurrentRevision.UserProperties; } }
+        public IDictionary<String, Object> UserProperties { get { return CurrentRevision != null ? CurrentRevision.UserProperties : null; } }
 
         /// <summary>
         /// Deletes the <see cref="Couchbase.Lite.Document"/>.
@@ -212,7 +209,7 @@ namespace Couchbase.Lite {
         /// <exception cref="Couchbase.Lite.CouchbaseLiteException">
         /// Thrown if an issue occurs while deleting the <see cref="Couchbase.Lite.Document"/>.
         /// </exception>
-        public void Delete() { CurrentRevision.DeleteDocument(); }
+        public void Delete() { if (CurrentRevision != null) { CurrentRevision.DeleteDocument(); } }
 
         /// <summary>
         /// Completely purges the <see cref="Couchbase.Lite.Document"/> from the local <see cref="Couchbase.Lite.Database"/>. 
@@ -248,7 +245,7 @@ namespace Couchbase.Lite {
             if (CurrentRevision != null && id.Equals(CurrentRevision.Id))
                 return CurrentRevision;
 
-            var contentOptions = EnumSet.NoneOf<TDContentOptions>();
+            var contentOptions = DocumentContentOptions.None;
             var revisionInternal = Database.GetDocumentWithIDAndRev(Id, id, contentOptions);
 
             var revision = GetRevisionFromRev(revisionInternal);
@@ -279,7 +276,26 @@ namespace Couchbase.Lite {
         /// </summary>
         /// <returns>The value of the property with the specified key.</returns>
         /// <param name="key">The key of the property value to return.</param>
-        public Object GetProperty(String key) { return CurrentRevision.Properties.Get(key); }
+        public Object GetProperty(String key) { return CurrentRevision != null ? CurrentRevision.Properties.Get(key) : null; }
+
+        /// <summary>
+        /// Returns the TValue of the property with the specified key.
+        /// </summary>
+        /// <returns>The value of the property with the specified key as TValue.</returns>
+        /// <param name="key">The key of the property value to return.</param>
+        public TValue GetProperty<TValue>(String key)
+        {
+            TValue val;
+            try
+            {
+                val = (TValue)GetProperty(key);
+            }
+            catch (InvalidCastException)
+            {
+                val = default(TValue);
+            }
+            return val;
+        }
 
         /// <summary>
         /// Creates and saves a new <see cref="Couchbase.Lite.Revision"/> with the specified properties. 
@@ -363,7 +379,7 @@ namespace Couchbase.Lite {
             {
                 return currentRevision;
             }
-            return GetRevisionFromRev(Database.GetDocumentWithIDAndRev(Id, revId, EnumSet.NoneOf<TDContentOptions>()));
+            return GetRevisionFromRev(Database.GetDocumentWithIDAndRev(Id, revId, DocumentContentOptions.None));
         }
 
         internal void LoadCurrentRevisionFrom(QueryRow row)
@@ -406,7 +422,7 @@ namespace Couchbase.Lite {
             IDictionary<string, object> attachments = null;
             if (properties != null && properties.ContainsKey("_attachments"))
             {
-				attachments = properties.Get("_attachments").AsDictionary<string,object>();
+                attachments = properties.Get("_attachments").AsDictionary<string,object>();
             }
             if (attachments != null && attachments.Count > 0)
             {
@@ -450,7 +466,7 @@ namespace Couchbase.Lite {
         internal IList<SavedRevision> GetLeafRevisions(bool includeDeleted)
         {
             var result = new List<SavedRevision>();
-            RevisionList revs = Database.GetAllRevisionsOfDocumentID(Id, true);
+            var revs = Database.GetAllRevisionsOfDocumentID(Id, true);
             foreach (RevisionInternal rev in revs)
             {
                 // add it to result, unless we are not supposed to include deleted and it's deleted
@@ -491,7 +507,9 @@ namespace Couchbase.Lite {
             // current revision didn't change
             if (currentRevision != null && !rev.GetRevId().Equals(currentRevision.Id))
             {
-                currentRevision = new SavedRevision(this, rev);
+                currentRevision = rev.IsDeleted() 
+                    ? null 
+                    : new SavedRevision(this, rev);
             }
 
             var args = new DocumentChangeEventArgs {

@@ -48,20 +48,39 @@ using Couchbase.Lite.Internal;
 
 namespace Couchbase.Lite
 {
-	public class DocumentTest : LiteTestCase
-	{
-		/// <exception cref="Couchbase.Lite.CouchbaseLiteException"></exception>
+    public class DocumentTest : LiteTestCase
+    {
+        /// <exception cref="Couchbase.Lite.CouchbaseLiteException"></exception>
         [Test]
-        public void TestNewDocumentHasCurrentRevision()
-		{
+        public void TestUnsavedDocumentReturnsNullValues()
+        {
+            var document = database.CreateDocument();
+            try
+            {
+                Assert.IsNull(document.Properties);
+                Assert.IsNull(document.CurrentRevisionId);
+                Assert.IsNull(document.CurrentRevision);
+                Assert.IsNull(document.RevisionHistory);
+                Assert.IsNull(document.GetRevision("doc2"));
+            }
+            catch
+            {
+                Assert.Fail("Document getter threw an exception");
+            }
+        }
+
+        /// <exception cref="Couchbase.Lite.CouchbaseLiteException"></exception>
+        [Test]
+        public void TestSavedDocumentHasCurrentRevision()
+        {
             var document = database.CreateDocument();
             var properties = new Dictionary<string, object>();
-			properties["foo"] = "foo";
-			properties["bar"] = false;
-			document.PutProperties(properties);
+            properties["foo"] = "foo";
+            properties["bar"] = false;
+            document.PutProperties(properties);
             Assert.IsNotNull(document.CurrentRevisionId);
-			Assert.IsNotNull(document.CurrentRevision);
-		}
+            Assert.IsNotNull(document.CurrentRevision);
+        }
 
         /// <exception cref="Couchbase.Lite.CouchbaseLiteException"></exception>
         [Test]
@@ -95,33 +114,33 @@ namespace Couchbase.Lite
             }
         }
 
-		/// <exception cref="Couchbase.Lite.CouchbaseLiteException"></exception>
+        /// <exception cref="Couchbase.Lite.CouchbaseLiteException"></exception>
         [Test]
         public void TestDeleteDocument()
-		{
+        {
             var document = database.CreateDocument();
             var properties = new Dictionary<string, object>();
-			properties["foo"] = "foo";
-			properties["bar"] = false;
-			document.PutProperties(properties);
-			Assert.IsNotNull(document.CurrentRevision);
+            properties["foo"] = "foo";
+            properties["bar"] = false;
+            document.PutProperties(properties);
+            Assert.IsNotNull(document.CurrentRevision);
 
             var docId = document.Id;
-			document.Delete();
+            document.Delete();
             Assert.IsTrue(document.Deleted);
-			Document fetchedDoc = database.GetExistingDocument(docId);
-			Assert.IsNull(fetchedDoc);
+            Document fetchedDoc = database.GetExistingDocument(docId);
+            Assert.IsNull(fetchedDoc);
 
-			// query all docs and make sure we don't see that document
-			database.GetAllDocs(new QueryOptions());
-			Query queryAllDocs = database.CreateAllDocumentsQuery();
-			QueryEnumerator queryEnumerator = queryAllDocs.Run();
-			for (IEnumerator<QueryRow> it = queryEnumerator; it.MoveNext();)
-			{
-				QueryRow row = it.Current;
+            // query all docs and make sure we don't see that document
+            database.GetAllDocs(new QueryOptions());
+            Query queryAllDocs = database.CreateAllDocumentsQuery();
+            QueryEnumerator queryEnumerator = queryAllDocs.Run();
+            for (IEnumerator<QueryRow> it = queryEnumerator; it.MoveNext();)
+            {
+                QueryRow row = it.Current;
                 Assert.IsFalse(row.Document.Id.Equals(docId));
-			}
-		}
+            }
+        }
 
         [Test]
         public void TestLoadRevisionBody()
@@ -138,8 +157,7 @@ namespace Couchbase.Lite
             var revisionInternal = new RevisionInternal(
                 document.Id, document.CurrentRevisionId, deleted, database);
 
-            var contentOptions = EnumSet.Of (TDContentOptions.TDIncludeAttachments, 
-                TDContentOptions.TDBigAttachmentsFollow);
+            var contentOptions = DocumentContentOptions.IncludeAttachments | DocumentContentOptions.BigAttachmentsFollow;
 
             database.LoadRevisionBody(revisionInternal, contentOptions);
 
@@ -157,5 +175,5 @@ namespace Couchbase.Lite
             Assert.IsTrue(gotExpectedException);
         }
 
-	}
+    }
 }

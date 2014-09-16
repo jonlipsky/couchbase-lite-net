@@ -109,6 +109,7 @@ ClientBin
 *.dbmdl
 Generated_Code #added for RIA/Silverlight projects
 *.walrus
+*.designer.cs
 
 # Android code gen.
 R.cs
@@ -134,3 +135,6 @@ src/lib/System.Net.Http.Formatting.dll
 src/lib/System.Net.Http.Formatting.dll.mdb
 
 Tools/sync_gateway
+Tools/sync_gateway.exe
+
+*.nupkg
