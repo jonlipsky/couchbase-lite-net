@@ -399,8 +399,8 @@ namespace Couchbase.Lite
 
             // TODO: Verify the foloowing 2 asserts. ChangesCount and CompletedChangesCount
             // should already be reset when the replicator stopped.
-             Assert.IsTrue(repl.ChangesCount >= 2);
-             Assert.IsTrue(repl.CompletedChangesCount >= 2);
+            Assert.IsTrue(repl.ChangesCount >= 2);
+            Assert.IsTrue(repl.CompletedChangesCount >= 2);
             Assert.IsNull(repl.LastError);
 
             VerifyRemoteDocExists(remote, doc1Id);

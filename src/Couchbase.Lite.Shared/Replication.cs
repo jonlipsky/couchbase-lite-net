@@ -1159,7 +1159,7 @@ namespace Couchbase.Lite
                 client.DefaultRequestHeaders.Authorization = authHeader;
             }
 
-            client.SendAsync(message, HttpCompletionOption.ResponseHeadersRead, CancellationTokenSource.Token)
+			client.SendAsync(message, HttpCompletionOption.ResponseHeadersRead, CancellationTokenSource.Token)
                 .ContinueWith(response=> {
                     if (response.Status != TaskStatus.RanToCompletion)
                     {
@@ -1197,7 +1197,7 @@ namespace Couchbase.Lite
             var server = response.Headers.Server;
             if (server != null && server.Any())
             {
-				ServerType = String.Join(" ", server.Select(pi => pi.Product).Where(pi => pi != null));
+                ServerType = String.Join(" ", server.Select(pi => pi.Product).Where(pi => pi != null));
                 Log.V(Tag, "Server Version: " + ServerType);
             }
         }
