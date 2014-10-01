@@ -9,7 +9,6 @@
     <RootNamespace>Couchbase.Lite.iOS</RootNamespace>
     <IPhoneResourcePrefix>Resources</IPhoneResourcePrefix>
     <AssemblyName>Couchbase.Lite</AssemblyName>
-    <ReleaseVersion>0.9.5</ReleaseVersion>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
     <DebugSymbols>true</DebugSymbols>
@@ -48,11 +47,11 @@
     <Reference Include="Newtonsoft.Json">
       <HintPath>..\..\..\..\bitbucket\WiseSketch\packages\Newtonsoft.Json.6.0.5\lib\portable-net45+wp80+win8+wpa81\Newtonsoft.Json.dll</HintPath>
     </Reference>
-    <Reference Include="SQLitePCL.raw">
-      <HintPath>..\..\..\..\bitbucket\WiseSketch\packages\SQLitePCL.raw_needy.0.6.1\lib\MonoTouch\SQLitePCL.raw.dll</HintPath>
-    </Reference>
     <Reference Include="SQLitePCL.ugly">
-      <HintPath>..\..\..\..\bitbucket\WiseSketch\packages\SQLitePCL.ugly.0.6.1\lib\portable-net45+netcore45+wp8+MonoAndroid10+MonoTouch10\SQLitePCL.ugly.dll</HintPath>
+      <HintPath>..\..\..\..\bitbucket\WiseSketch\packages\SQLitePCL.ugly.0.6.2\lib\portable-net45+netcore45+wp8+MonoAndroid10+MonoTouch10\SQLitePCL.ugly.dll</HintPath>
+    </Reference>
+    <Reference Include="SQLitePCL.raw">
+      <HintPath>..\..\..\..\bitbucket\WiseSketch\packages\SQLitePCL.raw_needy.0.6.2\lib\MonoTouch\SQLitePCL.raw.dll</HintPath>
     </Reference>
   </ItemGroup>
   <ItemGroup>
