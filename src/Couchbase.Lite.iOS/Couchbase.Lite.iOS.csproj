@@ -44,14 +44,14 @@
     <Reference Include="System.Data" />
     <Reference Include="System.Net.Http" />
     <Reference Include="System.Web.Services" />
-    <Reference Include="SQLitePCL.ugly">
-      <HintPath>..\..\..\..\bitbucket\WiseSketch\packages\SQLitePCL.ugly.0.6.2\lib\portable-net45+netcore45+wp8+MonoAndroid10+MonoTouch10\SQLitePCL.ugly.dll</HintPath>
-    </Reference>
-    <Reference Include="SQLitePCL.raw">
-      <HintPath>..\..\..\..\bitbucket\WiseSketch\packages\SQLitePCL.raw_needy.0.6.2\lib\MonoTouch\SQLitePCL.raw.dll</HintPath>
-    </Reference>
     <Reference Include="Newtonsoft.Json">
       <HintPath>..\..\..\..\bitbucket\WiseSketch\packages\Newtonsoft.Json.6.0.6\lib\portable-net40+sl5+wp80+win8+wpa81\Newtonsoft.Json.dll</HintPath>
+    </Reference>
+    <Reference Include="SQLitePCL.raw">
+      <HintPath>..\..\..\..\bitbucket\WiseSketch\packages\SQLitePCL.raw_basic.0.7.0\lib\MonoTouch\SQLitePCL.raw.dll</HintPath>
+    </Reference>
+    <Reference Include="SQLitePCL.ugly">
+      <HintPath>..\..\..\..\bitbucket\WiseSketch\packages\SQLitePCL.ugly.0.7.0\lib\portable-net45+netcore45+wp8+MonoAndroid10+MonoTouch10+Xamarin.iOS10\SQLitePCL.ugly.dll</HintPath>
     </Reference>
   </ItemGroup>
   <ItemGroup>
