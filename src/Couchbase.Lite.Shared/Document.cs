@@ -343,6 +343,13 @@ namespace Couchbase.Lite {
             var lastErrorCode = StatusCode.Unknown;
             do
             {
+                // Force the database to load the current revision
+                // from disk, which will happen when CreateRevision
+                // sees that currentRevision is null.
+                if (lastErrorCode == StatusCode.Conflict)
+                {
+                    currentRevision = null;
+                }
                 UnsavedRevision newRev = CreateRevision();
                 if (!updateDelegate(newRev))
                     break;
@@ -391,10 +398,11 @@ namespace Couchbase.Lite {
             var revId = row.DocumentRevisionId;
             if (currentRevision == null || RevIdGreaterThanCurrent(revId))
             {
+                currentRevision = null;
                 var properties = row.DocumentProperties;
                 if (properties != null)
                 {
-                    var rev = new RevisionInternal(properties, row.Database);
+                    var rev = new RevisionInternal(properties);
                     currentRevision = new SavedRevision(this, rev);
                 }
             }
@@ -437,7 +445,7 @@ namespace Couchbase.Lite {
             }
 
             var deleted = (properties == null) || hasTrueDeletedProperty;
-            var rev = new RevisionInternal(Id, null, deleted, Database);
+            var rev = new RevisionInternal(Id, null, deleted);
             if (deleted)
                 rev.SetJson(Encoding.UTF8.GetBytes("{}"));
             if (properties != null)

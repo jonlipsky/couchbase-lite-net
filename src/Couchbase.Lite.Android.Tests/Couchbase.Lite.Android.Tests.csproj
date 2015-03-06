@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <PropertyGroup>
     <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
@@ -15,8 +15,10 @@
     <AndroidUseLatestPlatformSdk>True</AndroidUseLatestPlatformSdk>
     <AssemblyName>Couchbase.Lite.Android.Tests</AssemblyName>
     <AndroidManifest>Properties\AndroidManifest.xml</AndroidManifest>
-    <TargetFrameworkVersion>v4.4</TargetFrameworkVersion>
-    <ReleaseVersion>0.9.5</ReleaseVersion>
+    <TargetFrameworkVersion>v5.0</TargetFrameworkVersion>
+    <ReleaseVersion>1.0.4</ReleaseVersion>
+    <SolutionDir Condition="$(SolutionDir) == '' Or $(SolutionDir) == '*Undefined*'">..\</SolutionDir>
+    <RestorePackages>true</RestorePackages>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
     <DebugSymbols>true</DebugSymbols>
@@ -36,8 +38,6 @@
     <WarningLevel>4</WarningLevel>
     <AndroidUseSharedRuntime>false</AndroidUseSharedRuntime>
     <ConsolePause>false</ConsolePause>
-    <DebugSymbols>true</DebugSymbols>
-    <DebugType>pdbonly</DebugType>
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="System" />
@@ -50,12 +50,6 @@
     <Reference Include="System.Web.Services" />
     <Reference Include="Newtonsoft.Json">
       <HintPath>..\packages\Newtonsoft.Json.6.0.4\lib\portable-net45+wp80+win8+wpa81\Newtonsoft.Json.dll</HintPath>
-    </Reference>
-    <Reference Include="SQLitePCL.raw">
-      <HintPath>..\packages\SQLitePCL.raw_basic.0.5.0\lib\MonoAndroid\SQLitePCL.raw.dll</HintPath>
-    </Reference>
-    <Reference Include="SQLitePCL.ugly">
-      <HintPath>..\packages\SQLitePCL.ugly.0.5.0\lib\portable-net45+netcore45+wp8+MonoAndroid+MonoTouch\SQLitePCL.ugly.dll</HintPath>
     </Reference>
   </ItemGroup>
   <ItemGroup>
@@ -84,5 +78,16 @@
     <EmbeddedResource Include="Assets\attachment2.png" />
     <EmbeddedResource Condition="Exists('Assets\local-test.properties')" Include="Assets\local-test.properties" />
     <EmbeddedResource Include="Assets\test.properties" />
+    <EmbeddedResource Include="Assets\attachment.blob" />
+    <EmbeddedResource Include="Assets\noattachments.cblite" />
+    <EmbeddedResource Include="Assets\withattachments.cblite" />
+    <EmbeddedResource Include="Assets\performance-test.json" />
   </ItemGroup>
+  <Import Project="$(SolutionDir)\.nuget\NuGet.targets" Condition="Exists('$(SolutionDir)\.nuget\NuGet.targets')" />
+  <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
+    <PropertyGroup>
+      <ErrorText>This project references NuGet package(s) that are missing on this computer. Enable NuGet Package Restore to download them.  For more information, see http://go.microsoft.com/fwlink/?LinkID=322105. The missing file is {0}.</ErrorText>
+    </PropertyGroup>
+    <Error Condition="!Exists('$(SolutionDir)\.nuget\NuGet.targets')" Text="$([System.String]::Format('$(ErrorText)', '$(SolutionDir)\.nuget\NuGet.targets'))" />
+  </Target>
 </Project>

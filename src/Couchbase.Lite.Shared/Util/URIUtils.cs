@@ -46,10 +46,11 @@ using System.Web;
 
 using Sharpen;
 using System.Linq;
+using System.IO;
 
 namespace Couchbase.Lite.Util
 {
-    public static class URIUtils
+    internal static class URIUtils
     {
         /// <summary>Index of a component which was not found.</summary>
         /// <remarks>Index of a component which was not found.</remarks>
@@ -362,17 +363,11 @@ namespace Couchbase.Lite.Util
         {
             if (uri == null) return null;
 
-            if (!uri.AbsolutePath.EndsWith("/") && !String.IsNullOrWhiteSpace(path)) 
-            {
-                var newUri = new UriBuilder(uri);
-                newUri.Path += path;
-                var newUriStr = new Uri(Uri.UnescapeDataString(newUri.Uri.AbsoluteUri));
-                return newUriStr;
-            }
-            else
-            {
-                return new Uri(uri, path);
-            }
+            var newUri = new UriBuilder(uri);
+            newUri.Path = Path.Combine(newUri.Path.TrimEnd('/'), path.TrimStart('/'));
+
+            var newUriStr = new Uri(Uri.UnescapeDataString(newUri.Uri.AbsoluteUri));
+            return newUriStr;
         }
     }
 }

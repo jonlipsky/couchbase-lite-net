@@ -67,7 +67,7 @@ namespace Couchbase.Lite
 
     #region Constants
 
-        const string VersionString = "1.0.0-beta3";
+        const string VersionString = "1.0.4";
         const string Tag = "Manager";
 
         /// <summary>
@@ -121,7 +121,16 @@ namespace Couchbase.Lite
             illegalCharactersPattern = new Regex(IllegalCharacters);
             mapper = new ObjectWriter();
             DefaultOptions = ManagerOptions.Default;
-            defaultDirectory = new DirectoryInfo(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
+            //
+            // Note: Environment.SpecialFolder.LocalApplicationData returns null on Azure (and possibly other Windows Server environments)
+            // and this is only needed by the default constructor or when accessing the SharedInstanced
+            // So, let's only set it only when GetFolderPath returns something and allow the directory to be
+            // manually specified via the ctor that accepts a DirectoryInfo
+            var defaultDirectoryPath = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            if (!String.IsNullOrWhiteSpace(defaultDirectoryPath))
+            {
+                defaultDirectory = new DirectoryInfo(defaultDirectoryPath);
+            }
         }
 
         /// <summary>
@@ -142,7 +151,7 @@ namespace Couchbase.Lite
             this.directoryFile = directoryFile;
             this.options = options ?? DefaultOptions;
             this.databases = new Dictionary<string, Database>();
-            this.replications = new AList<Replication>();
+            this.replications = new List<Replication>();
 
             //create the directory, but don't fail if it already exists
             if (!directoryFile.Exists)
@@ -159,7 +168,7 @@ namespace Couchbase.Lite
 
             var scheduler = options.CallbackScheduler;
             CapturedContext = new TaskFactory(scheduler);
-            workExecutor = new TaskFactory(new SingleThreadTaskScheduler());
+            workExecutor = new TaskFactory(new SingleTaskThreadpoolScheduler());
             Log.D(Tag, "New Manager uses a scheduler with a max concurrency level of {0}".Fmt(workExecutor.Scheduler.MaximumConcurrencyLevel));
 
             this.NetworkReachabilityManager = new NetworkReachabilityManager();
@@ -186,7 +195,7 @@ namespace Couchbase.Lite
             get 
             { 
                 var databaseFiles = directoryFile.EnumerateFiles("*" + Manager.DatabaseSuffix, SearchOption.AllDirectories);
-                var result = new AList<String>();
+                var result = new List<String>();
                 foreach (var databaseFile in databaseFiles)
                 {
                     var path = Path.GetFileNameWithoutExtension(databaseFile.FullName);
@@ -267,10 +276,10 @@ namespace Couchbase.Lite
         /// Replaces or installs a database from a file.
         /// This is primarily used to install a canned database on first launch of an app, in which case
         /// you should first check .exists to avoid replacing the database if it exists already. The
-        /// canned database would have been copied into your app bundle at build time.
+        /// canned database would have been copied into your app at build time.
         /// </remarks>
-        /// <param name="databaseName">The name of the target Database to replace or create.</param>
-        /// <param name="databaseStream">InputStream on the source Database file.</param>
+        /// <param name="name">The name of the target Database to replace or create.</param>
+        /// <param name="databaseStream">Stream on the source Database file.</param>
         /// <param name="attachmentStreams">
         /// Map of the associated source Attachments, or null if there are no attachments.
         /// The Map key is the name of the attachment, the map value is an InputStream for
@@ -281,28 +290,27 @@ namespace Couchbase.Lite
         /// <exception cref="Couchbase.Lite.CouchbaseLiteException"></exception>
         public void ReplaceDatabase(String name, Stream databaseStream, IDictionary<String, Stream> attachmentStreams)
         {
-            var result = true;
-
             try {
-                var database = GetDatabase (name);
+                var database = GetDatabaseWithoutOpening (name, false);
                 var dstAttachmentsPath = database.AttachmentStorePath;
 
                 var destStream = File.OpenWrite(database.Path);
                 databaseStream.CopyTo(destStream);
+                destStream.Dispose();
 
-                var dstAttachmentsDirectory = new DirectoryInfo (dstAttachmentsPath);
-                //FileDirUtils.DeleteRecursive(attachmentsFile);
-                System.IO.Directory.Delete (dstAttachmentsPath, true);
-                dstAttachmentsDirectory.Create ();
+                if (File.Exists(dstAttachmentsPath)) 
+                {
+                    System.IO.Directory.Delete (dstAttachmentsPath, true);
+                }
+                System.IO.Directory.CreateDirectory(dstAttachmentsPath);
 
                 var attachmentsFile = new FilePath(dstAttachmentsPath);
 
                 if (attachmentStreams != null) {
                     StreamUtils.CopyStreamsToFolder(attachmentStreams, attachmentsFile);
                 }
-
+                database.Open();
                 database.ReplaceUUIDs ();
-
             } catch (Exception e) {
                 Log.E(Database.Tag, string.Empty, e);
                 throw new CouchbaseLiteException(StatusCode.InternalServerError);
@@ -449,8 +457,8 @@ namespace Couchbase.Lite
             }
 
             var replicator = push 
-                ? (Replication)new Pusher (database, url, true, new TaskFactory(new SingleThreadTaskScheduler()))
-                : (Replication)new Puller (database, url, true, new TaskFactory(new SingleThreadTaskScheduler()));
+                ? (Replication)new Pusher (database, url, true, new TaskFactory(new SingleTaskThreadpoolScheduler()))
+                : (Replication)new Puller (database, url, true, new TaskFactory(new SingleTaskThreadpoolScheduler()));
 
             replications.AddItem(replicator);
             if (start)

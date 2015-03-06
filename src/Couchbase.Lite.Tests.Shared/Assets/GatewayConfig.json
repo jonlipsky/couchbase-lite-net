@@ -1,11 +1,13 @@
 {
+    "adminInterface": ":4985",
+    "interface": ":4984",
      "log":["REST", "REST+", "HTTP", "HTTP+", "Access", "Cache", "Shadow", "Shadow+", "CRUD", "CRUD+", "Changes", "Changes+", "JSON", "JSON+"],
      "verbose": true,
      "databases": {
           "db": {
              "server":"walrus:",
              "users": {"GUEST": {"disabled": false, "all_channels": ["*"], "admin_channels": ["*"]}},
-             "bucket":"db",
+             "bucket":"testing",
              "sync":`function(doc) {channel(doc.channels);}`
           }
      },

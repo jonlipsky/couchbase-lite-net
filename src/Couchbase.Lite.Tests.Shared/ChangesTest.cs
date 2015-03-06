@@ -25,7 +25,7 @@
 // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 //
-/**
+/*
 * Original iOS version by Jens Alfke
 * Ported to Android by Marty Schoch, Traun Leyden
 *
@@ -71,7 +71,7 @@ namespace Couchbase.Lite
             documentProperties["baz"] = "touch";
             
             var body = new Body(documentProperties);
-            var rev1 = new RevisionInternal(body, database);
+            var rev1 = new RevisionInternal(body);
             
             var status = new Status();
             database.PutRevision(rev1, null, false, status);
@@ -120,7 +120,7 @@ namespace Couchbase.Lite
             database.Changed += handler;
 
             // Insert a dcoument as if it came from a remote source.
-            var rev = new RevisionInternal("docId", "1-rev", false, database);
+            var rev = new RevisionInternal("docId", "1-rev", false);
             var properties = new Dictionary<string, object>();
             properties["_id"] = rev.GetDocId();
             properties["_rev"] = rev.GetRevId();

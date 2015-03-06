@@ -114,6 +114,7 @@ namespace Couchbase.Lite {
             View = view;
             Limit = Int32.MaxValue;
             MapOnly = (view != null && view.Reduce == null);
+            InclusiveEnd = true;
             IndexUpdateMode = IndexUpdateMode.Before;
             AllDocsMode = AllDocsMode.AllDocs;
         }
@@ -141,6 +142,7 @@ namespace Couchbase.Lite {
             MapOnly = query.MapOnly;
             StartKeyDocId = query.StartKeyDocId;
             EndKeyDocId = query.EndKeyDocId;
+            InclusiveEnd = query.InclusiveEnd;
             IndexUpdateMode = query.IndexUpdateMode;
             AllDocsMode = query.AllDocsMode;
         }
@@ -173,7 +175,7 @@ namespace Couchbase.Lite {
                 queryOptions.SetDescending(Descending);
                 queryOptions.SetIncludeDocs(Prefetch);
                 queryOptions.SetUpdateSeq(true);
-                queryOptions.SetInclusiveEnd(true);
+                queryOptions.SetInclusiveEnd(InclusiveEnd);
                 queryOptions.SetIncludeDeletedDocs(IncludeDeleted);
                 queryOptions.SetStale(IndexUpdateMode);
                 queryOptions.SetAllDocsMode(AllDocsMode);
@@ -254,6 +256,13 @@ namespace Couchbase.Lite {
         public String EndKeyDocId { get; set; }
 
         /// <summary>
+        /// If true the EndKey (or EndKeyDocID) comparison uses "<=". Else it uses "<".
+        /// Default value is <c>true</c>.
+        /// </summary>
+        /// <value><c>true</c> if InclusiveEnd; otherwise, <c>false</c>.</value>
+        public Boolean InclusiveEnd { get; set; }
+
+        /// <summary>
         /// Gets or sets when a <see cref="Couchbase.Lite.View"/> index is updated when running a Query.
         /// </summary>
         /// <value>The index update mode.</value>
@@ -316,6 +325,9 @@ namespace Couchbase.Lite {
             } 
         }
 
+        /// <summary>
+        /// Event raised when a query has finished running.
+        /// </summary>
         public event EventHandler<QueryCompletedEventArgs> Completed;
 
         //Methods
@@ -336,10 +348,20 @@ namespace Couchbase.Lite {
             var viewName = (View != null) ? View.Name : null;
             var queryOptions = QueryOptions;
 
-            var rows = Database.QueryViewNamed (viewName, queryOptions, outSequence);
+            IEnumerable<QueryRow> rows = null;
+            var success = Database.RunInTransaction(()=>
+            {
+                rows = Database.QueryViewNamed (viewName, queryOptions, outSequence);
+                
+                LastSequence = outSequence[0];
+                
+                return true;
+            });
 
-            LastSequence = outSequence[0]; // potential concurrency issue?
-
+            if (!success)
+            {
+                throw new CouchbaseLiteException("Failed to query view named " + viewName, StatusCode.DbError);
+            }
             return new QueryEnumerator(Database, rows, outSequence[0]);
         }
 

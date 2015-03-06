@@ -57,6 +57,9 @@ using Couchbase.Lite.Support;
 using Couchbase.Lite.Util;
 using Sharpen;
 
+#if !NET_4_0
+using TaskEx = System.Threading.Tasks.Task;
+#endif
 
 namespace Couchbase.Lite
 {
@@ -127,19 +130,16 @@ namespace Couchbase.Lite
             : this(db, remote, continuous, null, workExecutor) { }
 
         /// <summary>Private Constructor</summary>
-        protected Replication(Database db, Uri remote, bool continuous, IHttpClientFactory clientFactory, TaskFactory workExecutor, CancellationTokenSource tokenSource = null)
+        protected Replication(Database db, Uri remote, bool continuous, IHttpClientFactory clientFactory, TaskFactory workExecutor)
         {
             LocalDatabase = db;
             Continuous = continuous;
             // NOTE: Consider running a separate scheduler for all http requests.
             WorkExecutor = workExecutor;
-            var ts = tokenSource != null
-                ? CancellationTokenSource.CreateLinkedTokenSource(tokenSource.Token)
-                : new CancellationTokenSource();
-            CancellationTokenSource = ts;
+            CancellationTokenSource = new CancellationTokenSource();
             RemoteUrl = remote;
             Status = ReplicationStatus.Stopped;
-            online = true;
+            online = Manager.SharedInstance.NetworkReachabilityManager.CurrentStatus == NetworkReachabilityStatus.Reachable;
             RequestHeaders = new Dictionary<String, Object>();
             requests = new HashSet<HttpClient>();
 
@@ -203,7 +203,7 @@ namespace Couchbase.Lite
                     Log.E(Tag, "ERROR: ProcessInbox failed: ", e);
                     throw new RuntimeException(e);
                 }
-            }, CancellationTokenSource);
+            });
 
             SetClientFactory(clientFactory);
         }
@@ -213,7 +213,7 @@ namespace Couchbase.Lite
     #region Constants
 
         const int ProcessorDelay = 500; //Milliseconds
-        const int InboxCapacity = 100;
+        internal const int InboxCapacity = 100;
         const int RetryDelay = 60; // Seconds
         const int SaveLastSequenceDelay = 2; //Seconds
 
@@ -232,9 +232,18 @@ namespace Couchbase.Lite
 
         protected internal String  sessionID;
 
+        protected void SetLastError(Exception error) {
+            if (LastError != error)
+            {
+                Log.E(Tag, " Progress: set error = ", error);
+                LastError = error;
+                NotifyChangeListeners();
+            }
+        }
+
         protected internal Boolean lastSequenceChanged;
 
-        private String lastSequence;
+        private String lastSequence = "0";
         protected internal String LastSequence
         {
             get { return lastSequence; }
@@ -248,7 +257,8 @@ namespace Couchbase.Lite
                     if (!lastSequenceChanged)
                     {
                         lastSequenceChanged = true;
-                        Task.Delay(SaveLastSequenceDelay)
+
+                        TaskEx.Delay(SaveLastSequenceDelay)
                             .ContinueWith(task =>
                             {
                                 SaveLastSequence();
@@ -258,19 +268,18 @@ namespace Couchbase.Lite
             }
         }
 
-        protected internal Boolean savingCheckpoint;
-        protected internal Boolean overdueForSave;
-        protected internal IDictionary<String, Object> remoteCheckpoint;
-        protected internal Boolean online;
+        internal Boolean savingCheckpoint;
+        internal Boolean overdueForSave;
+        internal IDictionary<String, Object> remoteCheckpoint;
+        internal volatile Boolean online;
+        internal volatile Boolean offline_inprogress;
 
-        protected internal Boolean continuous;
+        internal Boolean continuous;
 
-        protected internal Int32 completedChangesCount;
-        protected internal Int32 changesCount;
-        protected internal Int32 asyncTaskCount;
-        protected internal Boolean active;
-
-        internal IAuthenticator Authenticator { get; set; }
+        internal Int32 completedChangesCount;
+        internal Int32 changesCount;
+        internal Int32 asyncTaskCount;
+        internal Boolean active;
 
         internal CookieContainer CookieContainer
         {
@@ -297,7 +306,7 @@ namespace Couchbase.Lite
 
         // FIXME: This is never assigned, as a result Start never initializes revisionBodyTransformationFunction
 
-        protected Func<RevisionInternal, RevisionInternal> revisionBodyTransformationFunction;
+        internal Func<RevisionInternal, RevisionInternal> revisionBodyTransformationFunction;
 
         protected void SafeIncrementCompletedChangesCount()
         {
@@ -306,13 +315,27 @@ namespace Couchbase.Lite
 
         protected void SafeAddToCompletedChangesCount(int value)
         {
-            if (value == 0) {
+            if (value == 0) 
+            {
                 return;
             }
 
             Log.V(Tag, ">>>Updating completedChangesCount from {0} by {1}", completedChangesCount, value);
             Interlocked.Add(ref completedChangesCount, value);
             Log.V(Tag, "<<<Updated completedChanges count to {0}", completedChangesCount);
+            NotifyChangeListeners();
+        }
+
+        protected void SafeAddToChangesCount(int value)
+        {
+            if (value == 0) 
+            {
+                return;
+            }
+
+            Log.V(Tag, ">>>Updating changesCount from {0} by {1}", changesCount, value);
+            Interlocked.Add(ref changesCount, value);
+            Log.V(Tag, "<<<Updated changesCount to {0}", changesCount);
             NotifyChangeListeners();
         }
 
@@ -375,7 +398,10 @@ namespace Couchbase.Lite
         // This method will be used by Router & Reachability Manager
         internal virtual bool GoOffline()
         {
-            if (!online)
+            //TODO.JHB: Should we check to see if the replication URL is local (if so,
+            //it would be unaffected by any network status changes)?  Or is that too much
+            //of an edge case...
+            if (!online || offline_inprogress)
             {
                 return false;
             }
@@ -385,6 +411,8 @@ namespace Couchbase.Lite
                 return false;
             }
 
+            offline_inprogress = true;
+
             LocalDatabase.Manager.RunAsync(() =>
             {
                 Log.D(Tag, "Going offline");
@@ -392,8 +420,8 @@ namespace Couchbase.Lite
                 online = false;
                 // FIXME: Shouldn't we let batcher drain?
                 StopRemoteRequests();
-                UpdateProgress();
                 NotifyChangeListeners();
+                offline_inprogress = false;
             });
 
             return true;
@@ -439,8 +467,17 @@ namespace Couchbase.Lite
 
             foreach(var client in remoteRequests)
             {
-                client.CancelPendingRequests();
+                try 
+                {
+                    client.CancelPendingRequests();
+                } catch(ObjectDisposedException)
+                {
+                    //Swallow, our work is already done for us
+                }
             }
+            CancellationTokenSource.Cancel();
+            CancellationTokenSource = new CancellationTokenSource();
+            //Task.WaitAll(((SingleTaskThreadpoolScheduler)WorkExecutor.Scheduler).ScheduledTasks.ToArray());
         }
 
         internal void UpdateProgress()
@@ -732,7 +769,7 @@ namespace Couchbase.Lite
 
         internal virtual void Stopping()
         {
-            Log.V(Tag, "STOPPING");
+            Log.V(Tag, "Stopping");
 
             IsRunning = false;
 
@@ -749,13 +786,14 @@ namespace Couchbase.Lite
                 var reachabilityManager = LocalDatabase.Manager.NetworkReachabilityManager;
                 if (reachabilityManager != null)
                 {
+                    reachabilityManager.StatusChanged -= NetworkStatusChanged;
                     reachabilityManager.StopListening();
                 }
             }
 
             ClearDbRef();
 
-            Log.V(Tag, "STOPPED");
+            Log.V(Tag, "...stopped");
         }
 
         internal void SaveLastSequence()
@@ -908,78 +946,89 @@ namespace Couchbase.Lite
             var token = requestTokenSource != null 
                 ? requestTokenSource.Token
                 : CancellationTokenSource.Token;
+
             Log.D(Tag, "Sending async {0} request to: {1}", method, url);
-            client.SendAsync(message, HttpCompletionOption.ResponseHeadersRead, token)
+            client.Timeout = TimeSpan.FromSeconds(10);
+            client.SendAsync(message, token)
                 .ContinueWith(response =>
                 {
-                    lock(requests)
+                    try 
                     {
-                        requests.Remove(client);
-                    }
-                    HttpResponseMessage result = null;
-                    if (!response.IsFaulted)
-                    {
-                        result = response.Result;
-                        UpdateServerType(result);
-                    }
-                    else
-                    {
-                        Log.E(Tag, "Http Message failed to send: {0}", message);
-                        Log.E(Tag, "Http exception", response.Exception.InnerException);
-                        if (message.Content != null) {
-                            Log.E(Tag, "\tFailed content: {0}", message.Content.ReadAsStringAsync().Result);
+                        lock(requests)
+                        {
+                            requests.Remove(client);
                         }
-                    }
-                    
-                    if (completionHandler != null)
-                    {
+                        HttpResponseMessage result = null;
                         Exception error = null;
-                        object fullBody = null;
-
-                        try
+                        if (!response.IsFaulted && !response.IsCanceled)
                         {
-                            if (response.Status != TaskStatus.RanToCompletion) {
-                                Log.D(Tag, "SendAsyncRequest did not run to completion.", response.Exception);
+                            result = response.Result;
+                            UpdateServerType(result);
+                        }
+                        else if(response.IsFaulted)
+                        {
+                            error = response.Exception.InnerException;
+                            Log.E(Tag, "Http Message failed to send: {0}", message);
+                            Log.E(Tag, "Http exception", response.Exception.InnerException);
+                            if (message.Content != null) {
+                                Log.E(Tag, "\tFailed content: {0}", message.Content.ReadAsStringAsync().Result);
                             }
+                        }
 
-                            error = error is AggregateException
-                                ? response.Exception.Flatten()
-                                : response.Exception;
+                        if (completionHandler != null)
+                        {
+                            object fullBody = null;
 
-                            if (error == null )
+                            try
                             {
-                                if (!result.IsSuccessStatusCode) 
+                                if (response.Status != TaskStatus.RanToCompletion) {
+                                    Log.D(Tag, "SendAsyncRequest did not run to completion.", response.Exception);
+                                }
+
+                                if(response.IsCanceled)
                                 {
-                                    result = response.Result;
-                                    error = new HttpResponseException(result.StatusCode);
+                                    error = new Exception("SendAsyncRequest Task has been canceled.");
+                                }
+                                else 
+                                {
+                                    error = error is AggregateException
+                                        ? response.Exception.Flatten()
+                                        : response.Exception;
+                                }
+
+                                if (error == null )
+                                {
+                                    if (!result.IsSuccessStatusCode) 
+                                    {
+                                        result = response.Result;
+                                        error = new HttpResponseException(result.StatusCode);
+                                    }
+                                }
+
+                                if (error == null)
+                                {
+                                    var content = result.Content;
+                                    if (content != null)
+                                    {
+                                        fullBody = mapper.ReadValue<object>(content.ReadAsStreamAsync().Result);
+                                    }
                                 }
                             }
-
-                            if (error == null)
+                            catch (Exception e)
                             {
-                                var content = result.Content;
-                                if (content != null)
-                                {
-                                    fullBody = mapper.ReadValue<object>(content.ReadAsStreamAsync().Result);
-                                }
+                                error = e;
+                                Log.E(Tag, "SendAsyncRequest has an error occurred.", e);
                             }
-                        }
-                        catch (Exception e)
-                        {
-                            error = e;
-                            Log.E(Tag, "SendAsyncRequest has an error occurred.", e);
+
+                            completionHandler(fullBody, error);
                         }
 
-                        if (response.Status == TaskStatus.Canceled)
-                        {
-                            fullBody = null;
-                            error = new Exception("SendAsyncRequest Task has been canceled.");
-                        }
-
-                        completionHandler(fullBody, error);
+                        return result;
                     }
-
-                    return result;
+                    finally
+                    {
+                        client.Dispose();
+                    }
                 }, token, TaskContinuationOptions.None, WorkExecutor.Scheduler);
 
             lock(requests)
@@ -1015,8 +1064,7 @@ namespace Couchbase.Lite
                     client.DefaultRequestHeaders.Authorization = authHeader;
                 }
 
-                client.SendAsync(message, HttpCompletionOption.ResponseHeadersRead, CancellationTokenSource.Token)
-                .ContinueWith(new Action<Task<HttpResponseMessage>>(responseMessage =>
+                client.SendAsync(message, CancellationTokenSource.Token).ContinueWith(new Action<Task<HttpResponseMessage>>(responseMessage =>
                 {
                     object fullBody = null;
                     Exception error = null;
@@ -1059,7 +1107,7 @@ namespace Couchbase.Lite
                                     {
                                         if (numBytesRead != bufLen)
                                         {
-                                            var bufferToAppend = new ArraySegment<Byte>(buffer, 0, numBytesRead);
+                                            var bufferToAppend = new Couchbase.Lite.Util.ArraySegment<Byte>(buffer, 0, numBytesRead);
                                             reader.AppendData(bufferToAppend);
                                         }
                                         else
@@ -1123,8 +1171,12 @@ namespace Couchbase.Lite
                     }
                     catch (IOException e)
                     {
-                        Log.E(Tag, "io exception", e);
+                        Log.E(Tag, "IO Exception", e);
                         error = e;
+                    }
+                    finally
+                    {
+                        client.Dispose();
                     }
                 }), WorkExecutor.Scheduler);
             }
@@ -1159,35 +1211,44 @@ namespace Couchbase.Lite
                 client.DefaultRequestHeaders.Authorization = authHeader;
             }
 
-            client.SendAsync(message, HttpCompletionOption.ResponseHeadersRead, CancellationTokenSource.Token)
+            client.SendAsync(message, CancellationTokenSource.Token)
                 .ContinueWith(response=> {
                     if (response.Status != TaskStatus.RanToCompletion)
                     {
                         Log.E(Tag, "SendAsyncRequest did not run to completion.", response.Exception);
+                        client.Dispose();
                         return null;
                     }
                     if ((Int32)response.Result.StatusCode > 300) {
                         SetLastError(new HttpResponseException(response.Result.StatusCode));
                         Log.E(Tag, "Server returned HTTP Error", LastError);
+                        client.Dispose();
                         return null;
                     }
                     return response.Result.Content.ReadAsStreamAsync();
                 }, CancellationTokenSource.Token)
                 .ContinueWith(response=> {
-                    var hasEmptyResult = response.Result == null || response.Result.Result == null || response.Result.Result.Length == 0;
-                    if (response.Status != TaskStatus.RanToCompletion) {
-                        Log.E (Tag, "SendAsyncRequest did not run to completion.", response.Exception);
-                    } else if (hasEmptyResult) {
-                        Log.E (Tag, "Server returned an empty response.", response.Exception ?? LastError);
-                    }
-                    if (completionHandler != null) {
-                        object fullBody = null;
-                        if (!hasEmptyResult)
-                        {
-                            var mapper = Manager.GetObjectMapper();
-                            fullBody = mapper.ReadValue<Object> (response.Result.Result);
+                    try 
+                    {
+                        var hasEmptyResult = response.Result == null || response.Result.Result == null || response.Result.Result.Length == 0;
+                        if (response.Status != TaskStatus.RanToCompletion) {
+                            Log.E (Tag, "SendAsyncRequest did not run to completion.", response.Exception);
+                        } else if (hasEmptyResult) {
+                            Log.E (Tag, "Server returned an empty response.", response.Exception ?? LastError);
                         }
-                        completionHandler (fullBody, response.Exception);
+                        if (completionHandler != null) {
+                            object fullBody = null;
+                            if (!hasEmptyResult)
+                            {
+                                var mapper = Manager.GetObjectMapper();
+                                fullBody = mapper.ReadValue<Object> (response.Result.Result);
+                            }
+                            completionHandler (fullBody, response.Exception);
+                        }
+                    }
+                    finally
+                    {
+                        client.Dispose();
                     }
                 }, CancellationTokenSource.Token);
         }
@@ -1197,7 +1258,7 @@ namespace Couchbase.Lite
             var server = response.Headers.Server;
             if (server != null && server.Any())
             {
-                ServerType = String.Join(" ", server.Select(pi => pi.Product));
+				ServerType = String.Join(" ", server.Select(pi => pi.Product).Where(pi => pi != null));
                 Log.V(Tag, "Server Version: " + ServerType);
             }
         }
@@ -1400,7 +1461,7 @@ namespace Couchbase.Lite
 
 
 
-        protected internal RevisionInternal TransformRevision(RevisionInternal rev)
+        internal RevisionInternal TransformRevision(RevisionInternal rev)
         {
             if (revisionBodyTransformationFunction != null)
             {
@@ -1422,7 +1483,7 @@ namespace Couchbase.Lite
                         if (xformed.GetProperties().ContainsKey("_attachments"))
                         {
                             // Insert 'revpos' properties into any attachments added by the callback:
-                            var mx = new RevisionInternal(xformed.GetProperties(), LocalDatabase);
+                            var mx = new RevisionInternal(xformed.GetProperties());
                             xformed = mx;
                             mx.MutateAttachments((name, info) => {
                                 if (info.Get("revpos") != null)
@@ -1494,7 +1555,7 @@ namespace Couchbase.Lite
         protected internal virtual void ScheduleRetryIfReady()
         {
             RetryIfReadyTokenSource = new CancellationTokenSource();
-            RetryIfReadyTask = Task.Delay(RetryDelay * 1000)
+            RetryIfReadyTask = TaskEx.Delay(RetryDelay * 1000)
                 .ContinueWith(task =>
                 {
                     if (RetryIfReadyTokenSource != null && !RetryIfReadyTokenSource.IsCancellationRequested)
@@ -1521,7 +1582,7 @@ namespace Couchbase.Lite
                         Debug.Assert (xformedProperties ["_id"].Equals (properties ["_id"]));
                         Debug.Assert (xformedProperties ["_rev"].Equals (properties ["_rev"]));
 
-                        var nuRev = new RevisionInternal (rev.GetProperties (), LocalDatabase);
+                        var nuRev = new RevisionInternal (rev.GetProperties ());
                         nuRev.SetProperties (xformedProperties);
                         return nuRev;
                     }
@@ -1697,22 +1758,13 @@ namespace Couchbase.Lite
         /// <value>The changes count.</value>
         public Int32 ChangesCount {
             get { return changesCount; }
-            protected set {
-                //Debug.Assert(value > 0);
-                Log.V(Tag, "Updating changes count by {0} to {1}", value, changesCount);
-                changesCount = value;
-                NotifyChangeListeners();
-            }
         }
 
-        protected void SetLastError(Exception error) {
-            if (LastError != error)
-            {
-                Log.E(Tag, " Progress: set error = ", error);
-                LastError = error;
-                NotifyChangeListeners();
-            }
-        }
+        /// <summary>
+        /// Gets or sets the authenticator.
+        /// </summary>
+        /// <value>The authenticator.</value>
+        public IAuthenticator Authenticator { get; set; }
 
         //Methods
 
@@ -1745,20 +1797,10 @@ namespace Couchbase.Lite
             IsRunning = true;
             LastSequence = null;
 
-            WorkExecutor.StartNew(CheckSession);
+            CheckSession();
 
             var reachabilityManager = LocalDatabase.Manager.NetworkReachabilityManager;
-            reachabilityManager.StatusChanged += (sender, e) =>
-            {
-                if (e.Status == NetworkReachabilityStatus.Reachable)
-                {
-                    GoOnline();
-                }
-                else
-                {
-                    GoOffline();
-                }
-            };
+            reachabilityManager.StatusChanged += NetworkStatusChanged;
             reachabilityManager.StartListening();
         }
 
@@ -1772,7 +1814,7 @@ namespace Couchbase.Lite
                 return;
             }
 
-            Log.V(Tag, "STOP...");
+            Log.V(Tag, "Stop...");
 
             continuous = false;
 
@@ -1790,14 +1832,10 @@ namespace Couchbase.Lite
                 LocalDatabase.ForgetReplication(this);
             }
 
-            if (IsRunning && asyncTaskCount <= 0)
+            if (IsRunning)
             {
-                Log.V(Tag, "calling stopped()");
+                Log.V(Tag, "calling stopping()");
                 Stopping();
-            }
-            else
-            {
-                Log.V(Tag, "not calling stopped().  running: " + IsRunning + " asyncTaskCount: " + asyncTaskCount);
             }
         }
 
@@ -1850,6 +1888,22 @@ namespace Couchbase.Lite
         /// changes.
         /// </summary>
         public event EventHandler<ReplicationChangeEventArgs> Changed;
+
+        #region Private Methods
+
+        private void NetworkStatusChanged(object sender, NetworkReachabilityChangeEventArgs e)
+        {
+            if (e.Status == NetworkReachabilityStatus.Reachable)
+            {
+                GoOnline();
+            }
+            else
+            {
+                GoOffline();
+            }
+        }
+
+        #endregion
     }
     #endregion
 
@@ -1884,4 +1938,5 @@ namespace Couchbase.Lite
     public delegate IDictionary<string, object> PropertyTransformationDelegate(IDictionary<string, object> propertyBag);
 
     #endregion
+
 }

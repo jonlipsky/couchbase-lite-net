@@ -49,14 +49,19 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using Couchbase.Lite.Storage;
+using System.IO;
+using System.Net.NetworkInformation;
+using System.Net.Http;
+using System.Net.Sockets;
+//using System.Net.WebSockets;
 
 namespace Couchbase.Lite
 {
-    public static class Misc
+    internal static class Misc
     {
         public static string CreateGUID()
         {
-            return Guid.NewGuid().ToString();
+            return Guid.NewGuid().ToString().ToLower();
         }
 
         public static string HexSHA1Digest(IEnumerable<Byte> input)
@@ -115,6 +120,25 @@ namespace Couchbase.Lite
             return param.Replace("\"", string.Empty);
         }
 
+        public static bool IsTransientNetworkError(Exception error)
+        {
+            return error is IOException
+                || error is TimeoutException
+                || error is WebException
+                || error is SocketException;
+                //|| error is WebSocketException;
+        }
+
+        public static bool IsTransientError(HttpResponseMessage response)
+        {
+            if (response == null)
+            {
+                return false;
+            }
+
+            return IsTransientError(response.StatusCode);
+        }
+
         public static bool IsTransientError(HttpStatusCode status)
         {
             if (status == HttpStatusCode.InternalServerError || 
@@ -131,7 +155,7 @@ namespace Couchbase.Lite
         public static byte[] ByteArrayResultForQuery(ISQLiteStorageEngine database, string query, params string[] args)
         {
             byte[] result = null;
-            using (var cursor = database.RawQuery(query, args))
+            using (var cursor = database.IntransactionRawQuery(query, args))
             {
                 if (cursor.MoveToNext())
                 {

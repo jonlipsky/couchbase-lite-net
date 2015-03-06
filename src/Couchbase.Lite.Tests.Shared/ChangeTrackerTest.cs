@@ -184,7 +184,7 @@ namespace Couchbase.Lite
             });
 
             var testUrl = GetReplicationURL();
-            var scheduler = new SingleThreadTaskScheduler();
+            var scheduler = new SingleTaskThreadpoolScheduler();
             var changeTracker = new ChangeTracker(testUrl, mode, 0, false, client, new TaskFactory(scheduler));
 
             changeTracker.UsePost = IsSyncGateway(testUrl);
@@ -206,14 +206,14 @@ namespace Couchbase.Lite
             client.HttpClientFactory = httpClientFactory;
 
             var testUrl = GetReplicationURL();
-            var scheduler = new SingleThreadTaskScheduler();
+            var scheduler = new SingleTaskThreadpoolScheduler();
             var changeTracker = new ChangeTracker(testUrl, ChangeTrackerMode.LongPoll, 0, false, client, new TaskFactory(scheduler));
 
             changeTracker.UsePost = IsSyncGateway(testUrl);
             changeTracker.Start();
 
             // sleep for a few seconds
-            Thread.Sleep(5 * 1000);
+            Thread.Sleep(15 * 1000);
 
             // make sure we got less than 10 requests in those 10 seconds (if it was hammering, we'd get a lot more)
             var handler = client.HttpRequestHandler;
@@ -287,7 +287,7 @@ namespace Couchbase.Lite
             handler.SetResponder("_changes", chainResponder);
 
             var testUrl = GetReplicationURL();
-            var scheduler = new SingleThreadTaskScheduler();
+            var scheduler = new SingleTaskThreadpoolScheduler();
             var changeTracker = new ChangeTracker(testUrl, mode, 0, false, client, new TaskFactory(scheduler));
 
             changeTracker.UsePost = IsSyncGateway(testUrl);

@@ -104,11 +104,13 @@ namespace Couchbase.Lite.Replicator
             {
                 return;
             }
-
+				
             creatingTarget = true;
 
             Log.V(Tag, "Remote db might not exist; creating it...");
             Log.D(Tag, "maybeCreateRemoteDB() calling asyncTaskStarted()");
+
+			AsyncTaskStarted();
             SendAsyncRequest(HttpMethod.Put, String.Empty, null, (result, e) =>
             {
                 try
@@ -278,6 +280,12 @@ namespace Couchbase.Lite.Replicator
 
         internal override void ProcessInbox(RevisionList inbox)
         {
+            if (!online)
+            {
+                Log.V(Tag, "Offline, so skipping inbox process");
+                return;
+            }
+
             // Generate a set of doc/rev IDs in the JSON format that _revs_diff wants:
             // <http://wiki.apache.org/couchdb/HttpPostRevsDiff>
             var diffs = new Dictionary<String, IList<String>>();
@@ -329,7 +337,7 @@ namespace Couchbase.Lite.Replicator
                                 }
 
                                 var revs = ((JArray)revResults.Get("missing")).Values<String>().ToList();
-                                if (revs == null || !revs.Contains(rev.GetRevId()))
+								if (revs == null || !revs.Any( id => id.Equals(rev.GetRevId(), StringComparison.OrdinalIgnoreCase)))
                                 {
                                     RemovePending(rev);
                                     continue;
@@ -340,7 +348,7 @@ namespace Couchbase.Lite.Replicator
 
                                 if (!dontSendMultipart && revisionBodyTransformationFunction == null)
                                 {
-                                    contentOptions &= DocumentContentOptions.BigAttachmentsFollow;
+                                    contentOptions |= DocumentContentOptions.BigAttachmentsFollow;
                                 }
 
 
@@ -379,6 +387,7 @@ namespace Couchbase.Lite.Replicator
 
                                     if (!dontSendMultipart && UploadMultipartRevision(populatedRev)) 
                                     {
+                                        SafeIncrementCompletedChangesCount();
                                         continue;
                                     }
                                 }
@@ -428,7 +437,8 @@ namespace Couchbase.Lite.Replicator
             }
 
             Log.V(Tag, string.Format("{0}: POSTing " + numDocsToSend + " revisions to _bulk_docs: {1}", this, docsToSend));
-            ChangesCount += numDocsToSend;
+
+            SafeAddToChangesCount(numDocsToSend);
 
             var bulkDocsBody = new Dictionary<string, object>();
             bulkDocsBody["docs"] = docsToSend;
@@ -626,7 +636,7 @@ namespace Couchbase.Lite.Replicator
             Log.D(Tag, "Uploading multipart request.  Revision: " + revision);
             Log.D(Tag, "uploadMultipartRevision() calling asyncTaskStarted()");
 
-            ChangesCount += 1;
+            SafeAddToChangesCount(1);
             AsyncTaskStarted();
 
             SendAsyncMultipartRequest(HttpMethod.Put, path, multiPart, (result, e) => {

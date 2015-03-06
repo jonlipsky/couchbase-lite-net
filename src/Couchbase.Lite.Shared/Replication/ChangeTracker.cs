@@ -57,6 +57,11 @@ using Couchbase.Lite.Util;
 using Sharpen;
 using System.Text;
 using Couchbase.Lite.Support;
+using Newtonsoft.Json;
+
+#if !NET_4_0
+using TaskEx = System.Threading.Tasks.Task;
+#endif
 
 namespace Couchbase.Lite.Replicator
 {
@@ -271,13 +276,6 @@ namespace Couchbase.Lite.Replicator
 
             while (IsRunning && !tokenSource.Token.IsCancellationRequested)
             {
-//                if (changesRequestTask != null && !changesRequestTask.IsCanceled && !changesRequestTask.IsFaulted) 
-//                {
-//                    Thread.Sleep(500);
-//                    continue;
-//                }
-                var httpClient = client.GetHttpClient();
-
                 if (Request != null)
                 {
                     Request.Dispose();
@@ -299,24 +297,28 @@ namespace Couchbase.Lite.Replicator
 
                 AddRequestHeaders(Request);
 
-                var authHeader = AuthUtils.GetAuthenticationHeaderValue(Authenticator, Request.RequestUri);
-                if (authHeader != null)
-                {
-                    httpClient.DefaultRequestHeaders.Authorization = authHeader;
-                }
-
                 var maskedRemoteWithoutCredentials = url.ToString();
                 maskedRemoteWithoutCredentials = maskedRemoteWithoutCredentials.ReplaceAll("://.*:.*@", "://---:---@");
                 Log.V(Tag, "Making request to " + maskedRemoteWithoutCredentials);
 
                 if (tokenSource.Token.IsCancellationRequested)
+                {
                     break;
+                }
 
                 Task<HttpResponseMessage> changesRequestTask = null;
                 Task<HttpResponseMessage> successHandler;
                 Task<Boolean> errorHandler;
 
+                HttpClient httpClient = null;
                 try {
+                    httpClient = client.GetHttpClient();
+                    var authHeader = AuthUtils.GetAuthenticationHeaderValue(Authenticator, Request.RequestUri);
+                    if (authHeader != null)
+                    {
+                        httpClient.DefaultRequestHeaders.Authorization = authHeader;
+                    }
+
                     changesFeedRequestTokenSource = CancellationTokenSource.CreateLinkedTokenSource(tokenSource.Token);
 
                     var evt = new ManualResetEvent(false);
@@ -330,7 +332,6 @@ namespace Couchbase.Lite.Replicator
                     // There's got to be a better way to deal with this.
                     var info = httpClient.SendAsync(
                         Request, 
-                        HttpCompletionOption.ResponseContentRead, 
                         changesFeedRequestTokenSource.Token
                     );
                     var infoAwaiter = info.ConfigureAwait(false).GetAwaiter();
@@ -350,41 +351,47 @@ namespace Couchbase.Lite.Replicator
 
                     errorHandler = changesRequestTask.ContinueWith(t =>
                     {
-                        if (t.IsCanceled) {
+                        if (t.IsCanceled) 
+                        {
                             return false; // Not a real error.
                         }
                         var err = t.Exception.Flatten();
                         Log.D(Tag, "ChangeFeedResponseHandler faulted.", err.InnerException ?? err);
                         Error = err.InnerException ?? err;
+                        backoff.SleepAppropriateAmountOfTime();
                         return true; // a real error.
                     }, changesFeedRequestTokenSource.Token, TaskContinuationOptions.OnlyOnFaulted, WorkExecutor.Scheduler);
 
-                    try {
-                        var completedTask = Task.WhenAll(successHandler, errorHandler);
+                    try 
+                    {
+                        var completedTask = TaskEx.WhenAll(successHandler, errorHandler);
                         completedTask.Wait((Int32)ManagerOptions.Default.RequestTimeout.TotalMilliseconds, changesFeedRequestTokenSource.Token);
                         Log.D(Tag, "Finished processing changes feed.");
-                    } catch (Exception ex) {
+                    } 
+                    catch (Exception ex) {
                         // Swallow TaskCancelledExceptions, which will always happen
                         // if either errorHandler or successHandler don't need to fire.
-                        if (!(ex.InnerException is TaskCanceledException))
+                        if (!(ex.InnerException is OperationCanceledException))
                             throw ex;
-                    } finally {
+                    } 
+                    finally 
+                    {
                         if (changesRequestTask.IsCompleted) 
                         {
-                            changesRequestTask.Dispose();
+                        changesRequestTask.Dispose();
                         }
                         changesRequestTask = null;
 
                         if (successHandler.IsCompleted) 
                         {
-                            successHandler.Dispose();
+                        successHandler.Dispose();
                         }
 
                         successHandler = null;
 
                         if (errorHandler.IsCompleted) 
                         {
-                            errorHandler.Dispose();
+                        errorHandler.Dispose();
                         }
 
                         errorHandler = null;
@@ -393,11 +400,7 @@ namespace Couchbase.Lite.Replicator
                         Request = null;
 
                         changesFeedRequestTokenSource.Dispose();
-
-                        if (httpClient != null) 
-                        {
-                            httpClient.Dispose();
-                        }
+						changesFeedRequestTokenSource = null;
                     }
                 }
                 catch (Exception e)
@@ -417,60 +420,16 @@ namespace Couchbase.Lite.Replicator
                 }
                 finally
                 {
+                    if (httpClient != null)
+                    {
+                        httpClient.Dispose();
+                    }
+
                     if (mode == ChangeTrackerMode.OneShot)
                     {
                         Stop();
                     }
                 }
-//                var singleRequestTokenSource = CancellationTokenSource.CreateLinkedTokenSource(tokenSource.Token);
-//                var cTask = httpClient.SendAsync(Request, HttpCompletionOption.ResponseHeadersRead, singleRequestTokenSource.Token);
-//                var bTask = cTask
-//                    .ContinueWith<HttpResponseMessage>(t =>
-//                    {
-//                        if (!IsRunning)
-//                        {
-//                            return null;
-//                            // swallow
-//                        }
-//                        if (t.IsFaulted && t.Exception.InnerException is IOException)
-//                        {
-//                            // in this case, just silently absorb the exception because it
-//                            // frequently happens when we're shutting down and have to
-//                            // close the socket underneath our read.
-//                            Log.E(Tag, "Exception in change tracker", t.Exception);
-//                            return null;
-//                        }
-//                        if (!singleRequestTokenSource.IsCancellationRequested && t.Exception != null)
-//                        {
-//                            var e = t.Exception.InnerException as WebException;
-//                            var status = (HttpStatusCode)e.Status;
-//                            if ((Int32)status >= 300 && !Misc.IsTransientError(status))
-//                            {
-//                                var response = t.Result;
-//                                var msg = response.Content != null 
-//                                    ? String.Format("Change tracker got error with status code: {0}", status)
-//                                    : String.Format("Change tracker got error with status code: {0} and null response content", status);
-//                                Log.E(Tag, msg);
-//                                Error = new CouchbaseLiteException(msg, new Status(status.GetStatusCode()));
-//                                Stop();
-//                            }
-//                            backoff.SleepAppropriateAmountOfTime();
-//                        }
-//                        return t.Result;
-//                    }, singleRequestTokenSource.Token, TaskContinuationOptions.OnlyOnFaulted, WorkExecutor.Scheduler)
-//                    .ContinueWith<HttpResponseMessage>(ChangeFeedResponseHandler, singleRequestTokenSource.Token, TaskContinuationOptions.OnlyOnRanToCompletion, WorkExecutor.Scheduler)
-//                    .ContinueWith<HttpResponseMessage>(t => 
-//                    {
-//                        Log.D(Tag, "ChangeFeedResponseHandler finished.");
-//                        singleRequestTokenSource.Token.ThrowIfCancellationRequested();
-//                        if (t != null) t.Result.Dispose();
-//                        return null;
-//                    }, singleRequestTokenSource.Token, TaskContinuationOptions.OnlyOnRanToCompletion, WorkExecutor.Scheduler);
-//                changesRequestTask = bTask;
-//                    .ContinueWith((t) => 
-//                    {
-//                        Log.D(Tag, "ChangeFeedResponseHandler faulted.");
-//                    }, singleRequestTokenSource.Token, TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.AttachedToParent, TaskScheduler.Default);
             }
         }
 
@@ -480,6 +439,7 @@ namespace Couchbase.Lite.Replicator
             if (response == null)
                 return null;
             var status = response.StatusCode;
+
             if ((Int32)status >= 300 && !Misc.IsTransientError(status))
             {
                 var msg = response.Content != null 
@@ -495,7 +455,20 @@ namespace Couchbase.Lite.Replicator
                 case ChangeTrackerMode.LongPoll:
                     {
                         var content = response.Content.ReadAsByteArrayAsync().Result;
-                        var fullBody = Manager.GetObjectMapper().ReadValue<IDictionary<string, object>>(content.AsEnumerable());
+                        IDictionary<string, object> fullBody;
+                        try
+                        {
+                            fullBody = Manager.GetObjectMapper().ReadValue<IDictionary<string, object>>(content.AsEnumerable());
+                        } 
+                        catch (JsonSerializationException ex)
+                        {
+                            const string timeoutContent = "{\"results\":[";
+                            if (!Encoding.UTF8.GetString(content).Trim().Equals(timeoutContent))
+                                throw ex;
+                            Log.V(Tag, "Timeout while waiting for changes.");
+                            backoff.SleepAppropriateAmountOfTime();
+                            return response;
+                        }
                         var responseOK = ReceivedPollResponse(fullBody);
                         if (responseOK)
                         {
@@ -593,15 +566,15 @@ namespace Couchbase.Lite.Replicator
 
         public bool Start()
         {
+            if (IsRunning)
+            {
+                return false;
+            }
+
             this.Error = null;
-            this.thread = new Thread(Run) { IsBackground = true };
+            this.thread = new Thread(Run) { IsBackground = true, Name = "Change Tracker Thread" };
             thread.Start();
-//            this.runTask = Task.Factory
-//                .StartNew(Run, tokenSource.Token, TaskCreationOptions.LongRunning, WorkExecutor.Scheduler)
-//                .ContinueWith(t =>
-//                {
-//                    Log.E(Tag, "Run task faulted", t.Exception);
-//                }, TaskContinuationOptions.OnlyOnFaulted);
+
             return true;
         }
 
@@ -623,7 +596,13 @@ namespace Couchbase.Lite.Replicator
 
                 if (changesFeedRequestTokenSource != null)
                 {
-                    changesFeedRequestTokenSource.Cancel();
+                    try {
+                        changesFeedRequestTokenSource.Cancel();
+                    }catch(ObjectDisposedException) {
+                        //FIXME Run() will often dispose this token source right out from under us since it
+                        //is running on a separate thread.
+                        Log.W(Tag, "Race condition on changesFeedRequestTokenSource detected");
+                    }
                 }
 
                 Stopped();

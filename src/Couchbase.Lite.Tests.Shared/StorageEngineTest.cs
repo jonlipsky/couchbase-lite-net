@@ -8,55 +8,41 @@ namespace Couchbase.Lite
     public class StorageEngineTest : LiteTestCase
     {
         [Test]
-        public void TestTransactionThreadSafe()
+        [Description("If the delegate returns true, the transaction should be committed.")]
+        public void TestRunInTransactionCommits()
         {
-            Assert.Inconclusive("This test does not result in a pass even when it should.");
             var storageEngine = database.StorageEngine;
-            try
+
+            storageEngine.ExecSQL("CREATE TABLE transTest (id INTEGER PRIMARY KEY, whatever INTEGER)");
+
+            database.RunInTransaction(() =>
             {
-                storageEngine.BeginTransaction();
-                storageEngine.ExecSQL("CREATE TABLE testtrans (id INTEGER PRIMARY KEY, count INTEGER)");
-                storageEngine.ExecSQL("INSERT INTO testtrans (id, count) VALUES (1, 0)");
-                storageEngine.SetTransactionSuccessful();
-                storageEngine.EndTransaction();
+                storageEngine.ExecSQL("INSERT INTO transTest VALUES (0,1)");
+                return true;
+            });
 
-                storageEngine.BeginTransaction();
-                storageEngine.ExecSQL("UPDATE testtrans SET count=1 WHERE id=1");
+            var result = storageEngine.RawQuery("SELECT EXISTS (SELECT 1 FROM transTest WHERE id=0 AND whatever=1)");
 
-                var startEvent = new ManualResetEvent(false);
-                var doneEvent = new ManualResetEvent(false);
+            Assert.AreEqual(1, result.GetInt(0));
+        }
 
-                Task.Factory.StartNew(()=> 
-                { 
-                    storageEngine.BeginTransaction();
-                    storageEngine.ExecSQL("UPDATE testtrans SET count=2 WHERE id=1");
-                    storageEngine.SetTransactionSuccessful();
-                    storageEngine.EndTransaction();
-                    startEvent.Set();
-                });
+        [Test]
+        [Description("If the delegate returns false, the transaction should be rolledback.")]
+        public void TestRunInTransactionRollsback()
+        {
+            var storageEngine = database.StorageEngine;
 
-                // Ensure that the other thread is running
-                Assert.IsTrue(startEvent.WaitOne(TimeSpan.FromSeconds(3)));
-                // Give the other thread a little time to work
-                //Thread.Sleep(1000);
+            storageEngine.ExecSQL("CREATE TABLE transTest (id INTEGER PRIMARY KEY, whatever INTEGER)");
 
-                var cursor = storageEngine.RawQuery("SELECT id, count FROM testtrans WHERE id=1");
-                Assert.IsTrue(cursor.MoveToNext());
-                Assert.AreEqual(1, cursor.GetInt(0));
-                Assert.AreEqual(1, cursor.GetInt(1));
-                storageEngine.SetTransactionSuccessful();
-                storageEngine.EndTransaction();
-
-                //doneEvent.WaitOne();
-            }
-            finally
+            database.RunInTransaction(() =>
             {
-                try 
-                { 
-                    storageEngine.ExecSQL("DROP TABLE IF EXISTS testtrans"); 
-                } 
-                catch (Exception e) { }
-            }
+                storageEngine.ExecSQL("INSERT INTO transTest values (0,1)");
+                return false;
+            });
+
+            var result = storageEngine.RawQuery("SELECT EXISTS (SELECT 1 FROM transTest WHERE id=0 AND whatever=1)");
+
+            Assert.AreEqual(0, result.GetInt(0));
         }
     }
 }

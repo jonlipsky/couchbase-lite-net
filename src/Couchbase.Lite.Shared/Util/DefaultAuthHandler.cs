@@ -66,6 +66,13 @@ namespace Couchbase.Lite.Replicator
 
         protected override HttpResponseMessage ProcessResponse (HttpResponseMessage response, CancellationToken cancellationToken)
         {
+            if (response.Content != null) {
+                var mre = new ManualResetEvent(false);
+                response.Content.LoadIntoBufferAsync().ConfigureAwait(false).GetAwaiter().OnCompleted(()=>{
+                    mre.Set();
+                });
+                mre.WaitOne(Manager.DefaultOptions.RequestTimeout, true);
+            }
             var hasSetCookie = response.Headers.Contains("Set-Cookie");
             if (hasSetCookie)
             {
@@ -81,10 +88,13 @@ namespace Couchbase.Lite.Replicator
         /// <exception cref="System.IO.IOException"></exception>
         protected override HttpRequestMessage ProcessRequest(HttpRequestMessage request, CancellationToken cancellationToken)
         {
-            // TODO: We could make this class handle more than one request using a dictionary of cancellation tokens,
-            //       but that would require using unique tokens per request, instead of sharing them. In order to
-            //       keep our easy cancellability, we can use linked cancellation sourceses that all link back
-            //       to our root cancellation token source.
+            if (request.Content != null) {
+                var mre = new ManualResetEvent(false);
+                request.Content.LoadIntoBufferAsync().ConfigureAwait(false).GetAwaiter().OnCompleted(()=>{
+                    mre.Set();
+                });
+                mre.WaitOne(Manager.DefaultOptions.RequestTimeout, true);
+            }
 
             return request;
         }
@@ -92,11 +102,6 @@ namespace Couchbase.Lite.Replicator
         #endregion
 
         #region Private
-
-        private static IEnumerator GetEnumerator() 
-        {
-            return AuthenticationManager.RegisteredModules; 
-        }
 
         private readonly HttpClientHandler context;
         private readonly CookieStore cookieStore;

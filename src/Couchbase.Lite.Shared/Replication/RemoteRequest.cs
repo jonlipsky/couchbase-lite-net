@@ -47,6 +47,10 @@ using System.Threading;
 using System.Linq;
 using System.Net.Http.Headers;
 
+#if !NET_4_0
+using TaskEx = System.Threading.Tasks.Task;
+#endif
+
 namespace Couchbase.Lite.Replicator
 {
     internal class RemoteRequest
@@ -107,19 +111,34 @@ namespace Couchbase.Lite.Replicator
         {
             Log.V(Tag, "{0}: RemoteRequest run() called, url: {1}".Fmt(this, url));
 
-            var httpClient = clientFactory.GetHttpClient();
-            
-            //var manager = httpClient.GetConnectionManager();
-            PreemptivelySetAuthCredentials(httpClient);
+            HttpClient httpClient = null;
+            try
+            {
+                httpClient = clientFactory.GetHttpClient();
 
-            requestMessage.Headers.Add("Accept", "multipart/related, application/json");           
-            AddRequestHeaders(requestMessage);
-            
-            SetBody(requestMessage);
-            
-            ExecuteRequest(httpClient, requestMessage);
-            
-            Log.V(Tag, "{0}: RemoteRequest run() finished, url: {1}".Fmt(this, url));
+                //var manager = httpClient.GetConnectionManager();
+                var authHeader = AuthUtils.GetAuthenticationHeaderValue(Authenticator, requestMessage.RequestUri);
+                if (authHeader != null)
+                {
+                    httpClient.DefaultRequestHeaders.Authorization = authHeader;
+                }
+
+                requestMessage.Headers.Add("Accept", "multipart/related, application/json");           
+                AddRequestHeaders(requestMessage);
+
+                SetBody(requestMessage);
+
+                ExecuteRequest(httpClient, requestMessage);
+
+                Log.V(Tag, "{0}: RemoteRequest run() finished, url: {1}".Fmt(this, url));
+            }
+            finally
+            {
+                if (httpClient != null)
+                {
+                    httpClient.Dispose();
+                }
+            }
         }
 
         public virtual void Abort()
@@ -158,7 +177,7 @@ namespace Couchbase.Lite.Replicator
         protected HttpRequestMessage CreateConcreteRequest()
         {
             var httpMethod = new HttpMethod(method);
-            var newRequest = new HttpRequestMessage(httpMethod, url.AbsoluteUri);;
+            var newRequest = new HttpRequestMessage(httpMethod, url.AbsoluteUri);
             return newRequest;
         }
 
@@ -180,6 +199,10 @@ namespace Couchbase.Lite.Replicator
                 entity.Headers.ContentType = new MediaTypeHeaderValue("application/json");
                 request.Content = entity;
             }
+            else
+            {
+                Log.W(Tag + ".SetBody", "No body found for this request to {0}", request.RequestUri);
+            }
         }
 
         /// <summary>
@@ -200,7 +223,7 @@ namespace Couchbase.Lite.Replicator
             {
                 return false;
             }
-            request.ContinueWith((t)=> Task.Delay(RetryDelayMs, _tokenSource.Token), _tokenSource.Token, TaskContinuationOptions.AttachedToParent, workExecutor.Scheduler)
+            request.ContinueWith((t)=> TaskEx.Delay(RetryDelayMs, _tokenSource.Token), _tokenSource.Token, TaskContinuationOptions.AttachedToParent, workExecutor.Scheduler)
                 .ContinueWith((t)=> Run(), _tokenSource.Token, TaskContinuationOptions.LongRunning, workExecutor.Scheduler);
             retryCount += 1;
             Log.D(Tag, "Will retry in {0} ms", RetryDelayMs);
@@ -222,7 +245,7 @@ namespace Couchbase.Lite.Replicator
                     return;
                 }
                 Log.V(Tag, "{0}: RemoteRequest calling httpClient.execute", this);
-                response = httpClient.SendAsync(requestMessage, HttpCompletionOption.ResponseHeadersRead, _tokenSource.Token).Result;
+                response = httpClient.SendAsync(requestMessage, _tokenSource.Token).Result;
                 Log.V(Tag, "{0}: RemoteRequest called httpClient.execute", this);
                 var status = response.StatusCode;
                 if (Misc.IsTransientError(status) && RetryRequest())
@@ -277,39 +300,6 @@ namespace Couchbase.Lite.Replicator
             }
             Log.V(Tag, "RemoteRequest calling respondWithResult.", error);
             RespondWithResult(fullBody, error, response);
-        }
-
-        protected internal void PreemptivelySetAuthCredentials(HttpClient httpClient)
-        {
-            var isUrlBasedUserInfo = false;
-            var userInfo = url.UserInfo;
-            if (userInfo != null)
-            {
-                isUrlBasedUserInfo = true;
-            }
-            else
-            {
-                if (Authenticator != null)
-                {
-                    var auth = Authenticator;
-                    userInfo = auth.UserInfo;
-                }
-            }
-            if (userInfo != null)
-            {
-                if (userInfo.Contains(":") && !userInfo.Trim().Equals(":"))
-                {
-                    var userInfoElements = userInfo.Split(':');
-                    var username = isUrlBasedUserInfo ? URIUtils.Decode(userInfoElements[0]) : userInfoElements[0];
-                    var password = isUrlBasedUserInfo ? URIUtils.Decode(userInfoElements[1]) : userInfoElements[1];
-                    var authHandler = clientFactory.Handler.InnerHandler as HttpClientHandler;
-                    authHandler.Credentials = new NetworkCredential(username, password);
-                }
-                else
-                {
-                    Log.W(Tag, "RemoteRequest Unable to parse user info, not setting credentials");
-                }
-            }
         }
 
         public void RespondWithResult(object result, Exception error, HttpResponseMessage response)

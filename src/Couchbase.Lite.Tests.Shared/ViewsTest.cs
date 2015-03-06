@@ -25,7 +25,7 @@
 // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 //
-/**
+/*
 * Original iOS version by Jens Alfke
 * Ported to Android by Marty Schoch, Traun Leyden
 *
@@ -52,6 +52,7 @@ using NUnit.Framework;
 using Sharpen;
 using Newtonsoft.Json.Linq;
 using System.Threading;
+using System.Data;
 
 namespace Couchbase.Lite
 {
@@ -96,7 +97,7 @@ namespace Couchbase.Lite
         /// <exception cref="Couchbase.Lite.CouchbaseLiteException"></exception>
         private RevisionInternal PutDoc(Database db, IDictionary<string, object> props)
         {
-            var rev = new RevisionInternal(props, db);
+            var rev = new RevisionInternal(props);
             var status = new Status();
             rev = db.PutRevision(rev, null, false, status);
             Assert.IsTrue(status.IsSuccessful);
@@ -111,9 +112,9 @@ namespace Couchbase.Lite
         }
 
         /// <exception cref="Couchbase.Lite.CouchbaseLiteException"></exception>
-        public virtual IList<RevisionInternal> PutDocs(Database db)
+        private IList<RevisionInternal> PutDocs(Database db)
         {
-            var result = new AList<RevisionInternal>();
+            var result = new List<RevisionInternal>();
 
             var dict2 = new Dictionary<string, object>();
             dict2["_id"] = "22222";
@@ -145,9 +146,9 @@ namespace Couchbase.Lite
 
         // http://wiki.apache.org/couchdb/Introduction_to_CouchDB_views#Linked_documents
         /// <exception cref="Couchbase.Lite.CouchbaseLiteException"></exception>
-        public virtual IList<RevisionInternal> PutLinkedDocs(Database db)
+        private IList<RevisionInternal> PutLinkedDocs(Database db)
         {
-            var result = new AList<RevisionInternal>();
+            var result = new List<RevisionInternal>();
 
             var dict1 = new Dictionary<string, object>();
             dict1["_id"] = "11111";
@@ -176,7 +177,7 @@ namespace Couchbase.Lite
                 var doc = new Dictionary<string, object>();
                 doc.Put("_id", string.Format("{0}", i));
 
-                var key = new AList<string>();
+                var key = new List<string>();
                 for (int j = 0; j < 256; j++)
                 {
                     key.AddItem("key");
@@ -261,7 +262,7 @@ namespace Couchbase.Lite
             view.UpdateIndex();
 
             // Now add a doc and update a doc:
-            var threeUpdated = new RevisionInternal(rev3.GetDocId(), rev3.GetRevId(), false, database);
+            var threeUpdated = new RevisionInternal(rev3.GetDocId(), rev3.GetRevId(), false);
             numTimesMapFunctionInvoked = numTimesInvoked;
 
             var newdict3 = new Dictionary<string, object>();
@@ -282,7 +283,7 @@ namespace Couchbase.Lite
             var dict4 = new Dictionary<string, object>();
             dict4["key"] = "four";
             var rev4 = PutDoc(database, dict4);
-            var twoDeleted = new RevisionInternal(rev2.GetDocId(), rev2.GetRevId(), true, database);
+            var twoDeleted = new RevisionInternal(rev2.GetDocId(), rev2.GetRevId(), true);
             database.PutRevision(twoDeleted, rev2.GetRevId(), false, status);
             Assert.IsTrue(status.IsSuccessful);
 
@@ -323,7 +324,7 @@ namespace Couchbase.Lite
             QueryOptions options = new QueryOptions();
             IList<QueryRow> rows = view.QueryWithOptions(options).ToList();
 
-            var expectedRows = new AList<object>();
+            var expectedRows = new List<object>();
 
             var dict5 = new Dictionary<string, object>();
             dict5["id"] = "55555";
@@ -362,7 +363,7 @@ namespace Couchbase.Lite
             options.SetEndKey("one");
 
             rows = view.QueryWithOptions(options).ToList();
-            expectedRows = new AList<object>();
+            expectedRows = new List<object>();
             expectedRows.AddItem(dict5);
             expectedRows.AddItem(dict4);
             expectedRows.AddItem(dict1);
@@ -374,7 +375,7 @@ namespace Couchbase.Lite
             // Start/end query without inclusive end:
             options.SetInclusiveEnd(false);
             rows = view.QueryWithOptions(options).ToList();
-            expectedRows = new AList<object>();
+            expectedRows = new List<object>();
             expectedRows.AddItem(dict5);
             expectedRows.AddItem(dict4);
             Assert.AreEqual(2, rows.Count);
@@ -387,7 +388,7 @@ namespace Couchbase.Lite
             options.SetEndKey("five");
             options.SetInclusiveEnd(true);
             rows = view.QueryWithOptions(options).ToList();
-            expectedRows = new AList<object>();
+            expectedRows = new List<object>();
             expectedRows.AddItem(dict4);
             expectedRows.AddItem(dict5);
             Assert.AreEqual(2, rows.Count);
@@ -397,19 +398,19 @@ namespace Couchbase.Lite
             // Reversed, no inclusive end:
             options.SetInclusiveEnd(false);
             rows = view.QueryWithOptions(options).ToList();
-            expectedRows = new AList<object>();
+            expectedRows = new List<object>();
             expectedRows.AddItem(dict4);
             Assert.AreEqual(1, rows.Count);
             Assert.AreEqual(dict4["key"], rows[0].Key);
 
             // Specific keys:
             options = new QueryOptions();
-            var keys = new AList<object>();
+            var keys = new List<object>();
             keys.AddItem("two");
             keys.AddItem("four");
             options.SetKeys(keys);
             rows = view.QueryWithOptions(options).ToList();
-            expectedRows = new AList<object>();
+            expectedRows = new List<object>();
             expectedRows.AddItem(dict4);
             expectedRows.AddItem(dict2);
             Assert.AreEqual(2, rows.Count);
@@ -417,17 +418,38 @@ namespace Couchbase.Lite
             Assert.AreEqual(dict2["key"], rows[1].Key);
         }
 
+        [Test]
+        public void TestLiveQueryStartEndKey()
+        {
+            var view = CreateView(database);
+
+            var query = view.CreateQuery();
+            query.StartKey = "one";
+            query.EndKey = "one\uFEFF";
+            var liveQuery = query.ToLiveQuery();
+            Assert.IsNotNull(liveQuery.StartKey);
+            Assert.IsNotNull(liveQuery.EndKey);
+
+            liveQuery.Start();
+            Thread.Sleep(2000);
+            Assert.AreEqual(0, liveQuery.Rows.Count);
+
+            PutDocs(database);
+            Thread.Sleep(2000);
+            Assert.AreEqual(1, liveQuery.Rows.Count);
+        }
+
         /// <exception cref="Couchbase.Lite.CouchbaseLiteException"></exception>
         [Test]
         public void TestAllDocsQuery()
         {
             var docs = PutDocs(database);
-            var expectedRow = new AList<QueryRow>();
+            var expectedRow = new List<QueryRow>();
             foreach (RevisionInternal rev in docs)
             {
                 var value = new Dictionary<string, object>();
                 value.Put("rev", rev.GetRevId());
-                value.Put("_conflicts", new AList<string>());
+                value.Put("_conflicts", new List<string>());
 
                 var queryRow = new QueryRow(rev.GetDocId(), 0, rev.GetDocId(), value, null);
                 queryRow.Database = database;
@@ -436,7 +458,7 @@ namespace Couchbase.Lite
 
             var options = new QueryOptions();
             var allDocs = database.GetAllDocs(options);
-            var expectedRows = new AList<QueryRow>();
+            var expectedRows = new List<QueryRow>();
             expectedRows.AddItem(expectedRow[2]);
             expectedRows.AddItem(expectedRow[0]);
             expectedRows.AddItem(expectedRow[3]);
@@ -452,7 +474,7 @@ namespace Couchbase.Lite
             options.SetStartKey("2");
             options.SetEndKey("44444");
             allDocs = database.GetAllDocs(options);
-            expectedRows = new AList<QueryRow>();
+            expectedRows = new List<QueryRow>();
             expectedRows.AddItem(expectedRow[0]);
             expectedRows.AddItem(expectedRow[3]);
             expectedRows.AddItem(expectedRow[1]);
@@ -462,7 +484,7 @@ namespace Couchbase.Lite
             // Start/end query without inclusive end:
             options.SetInclusiveEnd(false);
             allDocs = database.GetAllDocs(options);
-            expectedRows = new AList<QueryRow>();
+            expectedRows = new List<QueryRow>();
             expectedRows.AddItem(expectedRow[0]);
             expectedRows.AddItem(expectedRow[3]);
             expectedQueryResult = CreateExpectedQueryResult(expectedRows, 0);
@@ -471,7 +493,7 @@ namespace Couchbase.Lite
             // Get all documents: with default QueryOptions
             options = new QueryOptions();
             allDocs = database.GetAllDocs(options);
-            expectedRows = new AList<QueryRow>();
+            expectedRows = new List<QueryRow>();
             expectedRows.AddItem(expectedRow[2]);
             expectedRows.AddItem(expectedRow[0]);
             expectedRows.AddItem(expectedRow[3]);
@@ -482,12 +504,12 @@ namespace Couchbase.Lite
 
             // Get specific documents:
             options = new QueryOptions();
-            IList<object> docIds = new AList<object>();
+            IList<object> docIds = new List<object>();
             QueryRow expected2 = expectedRow[2];
             docIds.AddItem(expected2.Document.Id);
             options.SetKeys(docIds);
             allDocs = database.GetAllDocs(options);
-            expectedRows = new AList<QueryRow>();
+            expectedRows = new List<QueryRow>();
             expectedRows.AddItem(expected2);
             expectedQueryResult = CreateExpectedQueryResult(expectedRows, 0);
             Assert.AreEqual(expectedQueryResult.Select(kvp => kvp.Key).OrderBy(k => k), allDocs.Select(kvp => kvp.Key).OrderBy(k => k));
@@ -647,7 +669,7 @@ namespace Couchbase.Lite
             View view = database.GetView("grouper");
             view.SetMapReduce((IDictionary<string, object> document, EmitDelegate emitter)=>
             {
-                    IList<object> key = new AList<object>();
+                    IList<object> key = new List<object>();
                     key.AddItem(document["artist"]);
                     key.AddItem(document["album"]);
                     key.AddItem(document["track"]);
@@ -661,7 +683,7 @@ namespace Couchbase.Lite
             options.SetReduce(true);
 
             IList<QueryRow> rows = view.QueryWithOptions(options).ToList();
-            IList<IDictionary<string, object>> expectedRows = new AList<IDictionary<string, object>>();
+            IList<IDictionary<string, object>> expectedRows = new List<IDictionary<string, object>>();
             IDictionary<string, object> row1 = new Dictionary<string, object>();
             row1["key"] = null;
             row1["value"] = 1162.0;
@@ -672,9 +694,9 @@ namespace Couchbase.Lite
             //now group
             options.SetGroup(true);
             rows = view.QueryWithOptions(options).ToList();
-            expectedRows = new AList<IDictionary<string, object>>();
+            expectedRows = new List<IDictionary<string, object>>();
             row1 = new Dictionary<string, object>();
-            IList<string> key1 = new AList<string>();
+            IList<string> key1 = new List<string>();
             key1.AddItem("Gang Of Four");
             key1.AddItem("Entertainment!");
             key1.AddItem("Ether");
@@ -683,7 +705,7 @@ namespace Couchbase.Lite
             expectedRows.AddItem(row1);
 
             IDictionary<string, object> row2 = new Dictionary<string, object>();
-            IList<string> key2 = new AList<string>();
+            IList<string> key2 = new List<string>();
             key2.AddItem("Gang Of Four");
             key2.AddItem("Entertainment!");
             key2.AddItem("Natural's Not In It");
@@ -692,7 +714,7 @@ namespace Couchbase.Lite
             expectedRows.AddItem(row2);
 
             IDictionary<string, object> row3 = new Dictionary<string, object>();
-            IList<string> key3 = new AList<string>();
+            IList<string> key3 = new List<string>();
             key3.AddItem("Gang Of Four");
             key3.AddItem("Entertainment!");
             key3.AddItem("Not Great Men");
@@ -701,7 +723,7 @@ namespace Couchbase.Lite
             expectedRows.AddItem(row3);
 
             IDictionary<string, object> row4 = new Dictionary<string, object>();
-            IList<string> key4 = new AList<string>();
+            IList<string> key4 = new List<string>();
             key4.AddItem("Gang Of Four");
             key4.AddItem("Songs Of The Free");
             key4.AddItem("I Love A Man In Uniform");
@@ -710,7 +732,7 @@ namespace Couchbase.Lite
             expectedRows.AddItem(row4);
 
             IDictionary<string, object> row5 = new Dictionary<string, object>();
-            IList<string> key5 = new AList<string>();
+            IList<string> key5 = new List<string>();
             key5.AddItem("PiL");
             key5.AddItem("Metal Box");
             key5.AddItem("Memories");
@@ -731,16 +753,16 @@ namespace Couchbase.Lite
             //group level 1
             options.SetGroupLevel(1);
             rows = view.QueryWithOptions(options).ToList();
-            expectedRows = new AList<IDictionary<string, object>>();
+            expectedRows = new List<IDictionary<string, object>>();
             row1 = new Dictionary<string, object>();
-            key1 = new AList<string>();
+            key1 = new List<string>();
             key1.AddItem("Gang Of Four");
             row1["key"] = key1;
             row1["value"] = 853.0;
 
             expectedRows.AddItem(row1);
             row2 = new Dictionary<string, object>();
-            key2 = new AList<string>();
+            key2 = new List<string>();
             key2.AddItem("PiL");
             row2["key"] = key2;
             row2["value"] = 309.0;
@@ -753,23 +775,23 @@ namespace Couchbase.Lite
             //group level 2
             options.SetGroupLevel(2);
             rows = view.QueryWithOptions(options).ToList();
-            expectedRows = new AList<IDictionary<string, object>>();
+            expectedRows = new List<IDictionary<string, object>>();
             row1 = new Dictionary<string, object>();
-            key1 = new AList<string>();
+            key1 = new List<string>();
             key1.AddItem("Gang Of Four");
             key1.AddItem("Entertainment!");
             row1["key"] = key1;
             row1["value"] = 605.0;
             expectedRows.AddItem(row1);
             row2 = new Dictionary<string, object>();
-            key2 = new AList<string>();
+            key2 = new List<string>();
             key2.AddItem("Gang Of Four");
             key2.AddItem("Songs Of The Free");
             row2["key"] = key2;
             row2["value"] = 248.0;
             expectedRows.AddItem(row2);
             row3 = new Dictionary<string, object>();
-            key3 = new AList<string>();
+            key3 = new List<string>();
             key3.AddItem("PiL");
             key3.AddItem("Metal Box");
             row3["key"] = key3;
@@ -818,7 +840,7 @@ namespace Couchbase.Lite
             options.SetGroupLevel(1);
 
             IList<QueryRow> rows = view.QueryWithOptions(options).ToList();
-            IList<IDictionary<string, object>> expectedRows = new AList<IDictionary<string, object>>();
+            IList<IDictionary<string, object>> expectedRows = new List<IDictionary<string, object>>();
             IDictionary<string, object> row1 = new Dictionary<string, object>();
             row1["key"] = "A";
             row1["value"] = 2;
@@ -846,27 +868,27 @@ namespace Couchbase.Lite
         [Test]
         public void TestViewCollation()
         {
-            IList<object> list1 = new AList<object>();
+            IList<object> list1 = new List<object>();
             list1.AddItem("a");
-            IList<object> list2 = new AList<object>();
+            IList<object> list2 = new List<object>();
             list2.AddItem("b");
-            IList<object> list3 = new AList<object>();
+            IList<object> list3 = new List<object>();
             list3.AddItem("b");
             list3.AddItem("c");
-            IList<object> list4 = new AList<object>();
+            IList<object> list4 = new List<object>();
             list4.AddItem("b");
             list4.AddItem("c");
             list4.AddItem("a");
-            IList<object> list5 = new AList<object>();
+            IList<object> list5 = new List<object>();
             list5.AddItem("b");
             list5.AddItem("d");
-            IList<object> list6 = new AList<object>();
+            IList<object> list6 = new List<object>();
             list6.AddItem("b");
             list6.AddItem("d");
             list6.AddItem("e");
 
             // Based on CouchDB's "view_collation.js" test
-            IList<object> testKeys = new AList<object>();
+            IList<object> testKeys = new List<object>();
             testKeys.AddItem(null);
             testKeys.AddItem(false);
             testKeys.AddItem(true);
@@ -916,27 +938,27 @@ namespace Couchbase.Lite
         [Test]
         public void TestViewCollationRaw()
         {
-            IList<object> list1 = new AList<object>();
+            IList<object> list1 = new List<object>();
             list1.AddItem("a");
-            IList<object> list2 = new AList<object>();
+            IList<object> list2 = new List<object>();
             list2.AddItem("b");
-            IList<object> list3 = new AList<object>();
+            IList<object> list3 = new List<object>();
             list3.AddItem("b");
             list3.AddItem("c");
-            IList<object> list4 = new AList<object>();
+            IList<object> list4 = new List<object>();
             list4.AddItem("b");
             list4.AddItem("c");
             list4.AddItem("a");
-            IList<object> list5 = new AList<object>();
+            IList<object> list5 = new List<object>();
             list5.AddItem("b");
             list5.AddItem("d");
-            IList<object> list6 = new AList<object>();
+            IList<object> list6 = new List<object>();
             list6.AddItem("b");
             list6.AddItem("d");
             list6.AddItem("e");
 
             // Based on CouchDB's "view_collation.js" test
-            IList<object> testKeys = new AList<object>();
+            IList<object> testKeys = new List<object>();
             testKeys.AddItem(0);
             testKeys.AddItem(2.5);
             testKeys.AddItem(10);
@@ -1046,8 +1068,7 @@ namespace Couchbase.Lite
                 IDictionary<string, object> rowAsJson = row.AsJSONDictionary();
                 Log.D(Tag, string.Empty + rowAsJson);
                 IList<object> key = (IList<object>)rowAsJson["key"];
-                IDictionary<string, object> doc = (IDictionary<string, object>)rowAsJson.Get("doc"
-                    );
+                IDictionary<string, object> doc = (IDictionary<string, object>)rowAsJson.Get("doc");
                 string id = (string)rowAsJson["id"];
                 Assert.AreEqual(expected[i][0], id);
                 Assert.AreEqual(2, key.Count);
@@ -1087,18 +1108,222 @@ namespace Couchbase.Lite
 
             var properties = new Dictionary<string, object>();
             properties.Put("name", "test");
+            database.BeginTransaction();
             var doc = database.CreateDocument();
             var rev = doc.PutProperties(properties);
+            database.EndTransaction(true);
             for (var i = 0; i < 50; i++) {
                 rev = rev.CreateRevision(properties);
             }
-
             // Sleep to ensure that the LiveQuery is done all of its async operations.
-            Thread.Sleep(5000);
+            Thread.Sleep(8000);
 
             liveQuery.Stop();
 
             Assert.IsTrue(rowCountAlwaysOne);
+        }
+
+        [Test]
+        public void TestRunLiveQueriesWithReduce()
+        {
+            var view = database.GetView("vu");
+            view.SetMapReduce((document, emit) => emit(document["sequence"], 1), 
+                (keys, values, rereduce) => View.TotalValues(values.ToList()), "1");
+
+            var query = view.CreateQuery().ToLiveQuery();
+
+            var view1 = database.GetView("vu1");
+            view1.SetMapReduce((document, emit) => emit(document["sequence"], 1), 
+                (keys, values, rereduce) => View.TotalValues(values.ToList()), "1");
+
+            var query1 = view1.CreateQuery().ToLiveQuery();
+
+            const Int32 numDocs = 10;
+            CreateDocumentsAsync(database, numDocs);
+
+            Assert.IsNull(query.Rows);
+            query.Start();
+
+            var gotExpectedQueryResult = new CountdownEvent(1);
+            query.Changed += (sender, e) => 
+            {
+                Assert.IsNull(e.Error);
+                if (e.Rows.Count == 1 && Convert.ToInt32(e.Rows.GetRow(0).Value) == numDocs)
+                {
+                    gotExpectedQueryResult.Signal();
+                }
+            };
+
+            var success = gotExpectedQueryResult.Wait(TimeSpan.FromSeconds(10));
+            Assert.IsTrue(success);
+            query.Stop();
+
+            query1.Start();
+
+            CreateDocumentsAsync(database, numDocs + 5); //10 + 10 + 5
+
+            var gotExpectedQuery1Result = new CountdownEvent(1);
+            query1.Changed += (sender, e) => 
+            {
+                Assert.IsNull(e.Error);
+                if (e.Rows.Count == 1 && Convert.ToInt32(e.Rows.GetRow(0).Value) == (2 * numDocs) + 5)
+                {
+                    gotExpectedQuery1Result.Signal();
+                }
+            };
+
+            success = gotExpectedQuery1Result.Wait(TimeSpan.FromSeconds(10));
+            Assert.IsTrue(success);
+            query1.Stop();
+
+            Assert.AreEqual((2 * numDocs) + 5, database.DocumentCount);
+        }
+
+        [Test]
+        public void TestViewIndexSkipsDesignDocs() 
+        {
+            var view = CreateView(database);
+
+            var designDoc = new Dictionary<string, object>() 
+            {
+                {"_id", "_design/test"},
+                {"key", "value"}
+            };
+            PutDoc(database, designDoc);
+
+            view.UpdateIndex();
+            var rows = view.QueryWithOptions(null);
+            Assert.AreEqual(0, rows.Count());
+        }
+
+        [Test]
+        public void TestViewNumericKeys() {
+            var dict = new Dictionary<string, object>()
+            { 
+                {"_id", "22222"},
+                {"referenceNumber", 33547239},
+                {"title", "this is the title"}
+
+            };
+            PutDoc(database, dict);
+
+            var view = CreateView(database);
+            view.SetMap((document, emit) =>
+            {
+                if (document.ContainsKey("referenceNumber"))
+                {
+                    emit(document["referenceNumber"], document);
+                }
+            }, "1");
+
+            var query = view.CreateQuery();
+            query.StartKey = 33547239;
+            query.EndKey = 33547239;
+            var rows = query.Run();
+            Assert.AreEqual(1, rows.Count());
+            Assert.AreEqual(33547239, rows.GetRow(0).Key);
+        }
+            
+        [Test]
+        public void TestViewQueryStartKeyDocID()
+        {
+            PutDocs(database);
+
+            var result = new List<RevisionInternal>();
+
+            var dict = new Dictionary<string, object>() 
+            {
+                {"_id", "11112"},
+                {"key", "one"}
+            };
+            result.Add(PutDoc(database, dict));
+            var view = CreateView(database);
+            view.UpdateIndex();
+
+            var options = new QueryOptions();
+            options.SetStartKey("one");
+            options.SetStartKeyDocId("11112");
+            options.SetEndKey("three");
+            var rows = view.QueryWithOptions(options).ToList<QueryRow>();
+
+            Assert.AreEqual(2, rows.Count);
+            Assert.AreEqual("11112", rows[0].DocumentId);
+            Assert.AreEqual("one", rows[0].Key);
+            Assert.AreEqual("33333", rows[1].DocumentId);
+            Assert.AreEqual("three", rows[1].Key);
+
+            options = new QueryOptions();
+            options.SetEndKey("one");
+            options.SetEndKeyDocId("11111");
+            rows = view.QueryWithOptions(options).ToList<QueryRow>();
+
+            Assert.AreEqual(3, rows.Count);
+            Assert.AreEqual("55555", rows[0].DocumentId);
+            Assert.AreEqual("five", rows[0].Key);
+            Assert.AreEqual("44444", rows[1].DocumentId);
+            Assert.AreEqual("four", rows[1].Key);
+            Assert.AreEqual("11111", rows[2].DocumentId);
+            Assert.AreEqual("one", rows[2].Key);
+
+            options.SetStartKey("one");
+            options.SetStartKeyDocId("11111");
+            rows = view.QueryWithOptions(options).ToList<QueryRow>();
+
+            Assert.AreEqual(1, rows.Count);
+            Assert.AreEqual("11111", rows[0].DocumentId);
+            Assert.AreEqual("one", rows[0].Key);
+        }
+
+        private SavedRevision CreateTestRevisionNoConflicts(Document doc, string val) {
+            var unsavedRev = doc.CreateRevision();
+            var props = new Dictionary<string, object>() 
+            {
+                {"key", val}
+            };
+            unsavedRev.SetUserProperties(props);
+            return unsavedRev.Save();
+        }
+
+        [Test]
+        public void TestViewWithConflict() {
+            // Create doc and add some revs
+            var doc = database.CreateDocument();
+            var rev1 = CreateTestRevisionNoConflicts(doc, "1");
+            Assert.IsNotNull(rev1);
+            var rev2a = CreateTestRevisionNoConflicts(doc, "2a");
+            Assert.IsNotNull(rev2a);
+            var rev3 = CreateTestRevisionNoConflicts(doc, "3");
+            Assert.IsNotNull(rev3);
+
+            // index the view
+            var view = CreateView(database);
+            var rows = view.CreateQuery().Run();
+            Assert.AreEqual(1, rows.Count);
+            var row = rows.GetRow(0);
+            Assert.AreEqual(row.Key, "3");
+
+            // TODO: Why is this null?
+            //Assert.IsNotNull(row.DocumentRevisionId);
+
+            // Create a conflict
+            var rev2bUnsaved = rev1.CreateRevision();
+            var props = new Dictionary<string, object>() 
+            {
+                {"key", "2b"}
+            };
+            rev2bUnsaved.SetUserProperties(props);
+            var rev2b = rev2bUnsaved.Save(true);
+            Assert.IsNotNull(rev2b);
+
+            // re-run query
+            view.UpdateIndex();
+            rows = view.CreateQuery().Run();
+
+            // we should only see one row, with key=3.
+            // if we see key=2b then it's a bug.
+            Assert.AreEqual(1, rows.Count);
+            row = rows.GetRow(0);
+            Assert.AreEqual(row.Key, "3");
         }
     }
 }

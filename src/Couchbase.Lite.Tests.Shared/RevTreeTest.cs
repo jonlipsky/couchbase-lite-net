@@ -25,7 +25,7 @@
 // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 //
-/**
+/*
 * Original iOS version by Jens Alfke
 * Ported to Android by Marty Schoch, Traun Leyden
 *
@@ -60,7 +60,7 @@ namespace Couchbase.Lite
         [Test]
         public void TestForceInsertEmptyHistory()
         {
-            var rev = new RevisionInternal("FakeDocId", "1-tango", false, database);
+            var rev = new RevisionInternal("FakeDocId", "1-tango", false);
             var revProperties = new Dictionary<string, object>();
             revProperties.Put("_id", rev.GetDocId());
             revProperties.Put("_rev", rev.GetRevId());
@@ -75,14 +75,14 @@ namespace Couchbase.Lite
         [Test]
         public void TestRevTree()
         {
-            var rev = new RevisionInternal("MyDocId", "4-foxy", false, database);
+            var rev = new RevisionInternal("MyDocId", "4-foxy", false);
             var revProperties = new Dictionary<string, object>();
             revProperties.Put("_id", rev.GetDocId());
             revProperties.Put("_rev", rev.GetRevId());
             revProperties["message"] = "hi";
             rev.SetProperties(revProperties);
 
-            var revHistory = new AList<string>();
+            var revHistory = new List<string>();
             revHistory.AddItem(rev.GetRevId());
             revHistory.AddItem("3-thrice");
             revHistory.AddItem("2-too");
@@ -91,14 +91,14 @@ namespace Couchbase.Lite
             Assert.AreEqual(1, database.DocumentCount);
 
             VerifyHistory(database, rev, revHistory);
-            var conflict = new RevisionInternal("MyDocId", "5-epsilon", false, database);
+            var conflict = new RevisionInternal("MyDocId", "5-epsilon", false);
             var conflictProperties = new Dictionary<string, object>();
             conflictProperties.Put("_id", conflict.GetDocId());
             conflictProperties.Put("_rev", conflict.GetRevId());
             conflictProperties["message"] = "yo";
             conflict.SetProperties(conflictProperties);
             
-            var conflictHistory = new AList<string>();
+            var conflictHistory = new List<string>();
             conflictHistory.AddItem(conflict.GetRevId());
             conflictHistory.AddItem("4-delta");
             conflictHistory.AddItem("3-gamma");
@@ -109,11 +109,11 @@ namespace Couchbase.Lite
             VerifyHistory(database, conflict, conflictHistory);
             
             // Add an unrelated document:
-            var other = new RevisionInternal("AnotherDocID", "1-ichi", false, database);
+            var other = new RevisionInternal("AnotherDocID", "1-ichi", false);
             var otherProperties = new Dictionary<string, object>();
             otherProperties["language"] = "jp";
             other.SetProperties(otherProperties);
-            var otherHistory = new AList<string>();
+            var otherHistory = new List<string>();
             otherHistory.AddItem(other.GetRevId());
             database.ForceInsert(other, otherHistory, null);
             
@@ -151,7 +151,7 @@ namespace Couchbase.Lite
         {
             const string DOCUMENT_ID = "MyDocId";
 
-            var rev = new RevisionInternal(DOCUMENT_ID, "1-one", false, database);
+            var rev = new RevisionInternal(DOCUMENT_ID, "1-one", false);
             var revProperties = new Dictionary<string, object>();
             revProperties["_id"] = rev.GetDocId();
             revProperties["_rev"] = rev.GetRevId();
@@ -180,7 +180,7 @@ namespace Couchbase.Lite
             database.Changed -= handler;
 
             // add two more revisions to the document
-            var rev3 = new RevisionInternal(DOCUMENT_ID, "3-three", false, database);
+            var rev3 = new RevisionInternal(DOCUMENT_ID, "3-three", false);
             var rev3Properties = new Dictionary<string, object>();
             rev3Properties["_id"] = rev3.GetDocId();
             rev3Properties["_rev"] = rev3.GetRevId();
@@ -221,7 +221,7 @@ namespace Couchbase.Lite
             // add a conflicting revision, with the same history length as the last revision we
             // inserted. Since this new revision's revID has a higher ASCII sort, it should become the
             // new winning revision.
-            var conflictRev = new RevisionInternal(DOCUMENT_ID, "3-winner", false, database);
+            var conflictRev = new RevisionInternal(DOCUMENT_ID, "3-winner", false);
             var conflictProperties = new Dictionary<string, object>();
             conflictProperties["_id"] = conflictRev.GetDocId();
             conflictProperties["_rev"] = conflictRev.GetRevId();

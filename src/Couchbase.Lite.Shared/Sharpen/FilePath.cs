@@ -25,7 +25,7 @@
 // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 //
-/**
+/*
 * Original iOS version by Jens Alfke
 * Ported to Android by Marty Schoch, Traun Leyden
 *
@@ -201,7 +201,7 @@ namespace Sharpen
 
         public string GetCanonicalPath ()
         {
-            string p = Path.GetFullPath (path);
+            var p = Path.GetFullPath (path);
             p.TrimEnd (Path.DirectorySeparatorChar);
             return p;
         }

@@ -49,6 +49,7 @@ using System.Threading.Tasks;
 using System.Threading;
 using Newtonsoft.Json.Linq;
 using Couchbase.Lite.Internal;
+using Couchbase.Lite.Util;
 
 namespace Couchbase.Lite
 {
@@ -79,6 +80,12 @@ namespace Couchbase.Lite
 
             // Assert.
             Assert.IsFalse(result);
+        }
+
+        [Test]
+        public void TestGetDatabaseNameFromPath() 
+        {
+            Assert.AreEqual("baz", FileDirUtils.GetDatabaseNameFromPath("foo/bar/baz.cblite"));
         }
 
         [Test]
@@ -184,8 +191,20 @@ namespace Couchbase.Lite
         [Test]
         public void TestGetActiveReplications()
         {
+            if (!Boolean.Parse((string)Runtime.Properties["replicationTestsEnabled"]))
+            {
+                Assert.Inconclusive("Replication tests disabled.");
+                return;
+            }
+
             var remote = GetReplicationURL();
+            var doneSignal = new ManualResetEvent(false);
             var replication = database.CreatePullReplication(remote);
+            replication.Changed += (sender, e) => {
+                if (!replication.IsRunning) {
+                    doneSignal.Set();
+                }
+            };
 
             Assert.AreEqual(0, database.AllReplications.ToList().Count);
             Assert.AreEqual(0, database.ActiveReplicators.Count);
@@ -196,17 +215,8 @@ namespace Couchbase.Lite
             Assert.AreEqual(1, database.ActiveReplicators.Count);
 
             // TODO: Port full ReplicationFinishedObserver
-            var doneSignal = new CountdownEvent(1);
-            var replicateTask = new TaskFactory().StartNew(()=>
-                {
-                    replication.Changed += (sender, e) => {
-                        if (!replication.IsRunning) {
-                            doneSignal.Signal();
-                        }
-                    };
-                    return doneSignal.Wait(TimeSpan.FromSeconds(30));
-                });
-            var failed = replicateTask.Result;
+            var failed = doneSignal.WaitOne(TimeSpan.FromSeconds(30));
+
             Assert.True(failed);
             Assert.AreEqual(1, database.AllReplications.ToList().Count);
             Assert.AreEqual(0, database.ActiveReplicators.Count);
@@ -264,7 +274,7 @@ namespace Couchbase.Lite
 
             IDictionary<string, object> expected = null;
 
-            var rev = new RevisionInternal(properties, database);
+            var rev = new RevisionInternal(properties);
             Database.StubOutAttachmentsInRevBeforeRevPos(rev, 3, false);
             var checkAttachments = rev.GetProperties()["_attachments"].AsDictionary<string, object>();
             var result = (IDictionary<string, object>)checkAttachments["hello"];
@@ -278,7 +288,7 @@ namespace Couchbase.Lite
             expected["stub"] = true;
             AssertPropertiesAreEqual(expected, result);
 
-            rev = new RevisionInternal(properties, database);
+            rev = new RevisionInternal(properties);
             Database.StubOutAttachmentsInRevBeforeRevPos(rev, 2, false);
             checkAttachments = rev.GetProperties()["_attachments"].AsDictionary<string, object>();
             result = checkAttachments["hello"].AsDictionary<string, object>();
@@ -290,7 +300,7 @@ namespace Couchbase.Lite
             expected = goodbye.AsDictionary<string, object>();
             AssertPropertiesAreEqual(expected, result);
 
-            rev = new RevisionInternal(properties, database);
+            rev = new RevisionInternal(properties);
             Database.StubOutAttachmentsInRevBeforeRevPos(rev, 1, false);
             checkAttachments = rev.GetProperties()["_attachments"].AsDictionary<string, object>();
             result = checkAttachments["hello"].AsDictionary<string, object>();
@@ -301,7 +311,7 @@ namespace Couchbase.Lite
             AssertPropertiesAreEqual(expected, result);
 
             //Test the follows mode
-            rev = new RevisionInternal(properties, database);
+            rev = new RevisionInternal(properties);
             Database.StubOutAttachmentsInRevBeforeRevPos(rev, 3, true);
             checkAttachments = rev.GetProperties()["_attachments"].AsDictionary<string, object>();
             result = checkAttachments["hello"].AsDictionary<string, object>();
@@ -315,7 +325,7 @@ namespace Couchbase.Lite
             expected["stub"] = true;
             AssertPropertiesAreEqual(expected, result);
 
-            rev = new RevisionInternal(properties, database);
+            rev = new RevisionInternal(properties);
             Database.StubOutAttachmentsInRevBeforeRevPos(rev, 2, true);
             checkAttachments = rev.GetProperties()["_attachments"].AsDictionary<string, object>();
             result = checkAttachments["hello"].AsDictionary<string, object>();
@@ -329,7 +339,7 @@ namespace Couchbase.Lite
             expected["follows"] = true;
             AssertPropertiesAreEqual(expected, result);
 
-            rev = new RevisionInternal(properties, database);
+            rev = new RevisionInternal(properties);
             Database.StubOutAttachmentsInRevBeforeRevPos(rev, 1, true);
             checkAttachments = rev.GetProperties()["_attachments"].AsDictionary<string, object>();
             result = checkAttachments["hello"].AsDictionary<string, object>();
@@ -342,6 +352,70 @@ namespace Couchbase.Lite
             expected["revpos"] = 2;
             expected["follows"] = true;
             AssertPropertiesAreEqual(expected, result);
+        }
+
+        [Test]
+        public void TestEncodeDocumentJSON() 
+        {
+            var props = new Dictionary<string, object>() 
+            {
+                {"_local_seq", ""}
+            };
+
+            var revisionInternal = new RevisionInternal(props);
+            var encoded = database.EncodeDocumentJSON(revisionInternal);
+            Assert.IsNotNull(encoded);
+        }
+
+        [Test]
+        public void TestWinningRevIDOfDoc()
+        {
+            var properties = new Dictionary<string, object>() 
+            {
+                {"testName", "testCreateRevisions"},
+                {"tag", 1337}
+            };
+
+            var properties2a = new Dictionary<string, object>() 
+            {
+                {"testName", "testCreateRevisions"},
+                {"tag", 1338}
+            };
+
+            var properties2b = new Dictionary<string, object>()
+            {
+                {"testName", "testCreateRevisions"},
+                {"tag", 1339}
+            };
+
+            var doc = database.CreateDocument();
+            var newRev1 = doc.CreateRevision();
+            newRev1.SetUserProperties(properties);
+            var rev1 = newRev1.Save();
+
+            var outIsDeleted = new List<Boolean>();
+            var outIsConflict = new List<Boolean>();
+
+            var docNumericId = database.GetDocNumericID(doc.Id);
+            Assert.IsTrue(docNumericId != 0);
+            Assert.AreEqual(rev1.Id, database.WinningRevIDOfDoc(docNumericId, outIsDeleted, outIsConflict));
+            Assert.IsTrue(outIsConflict.Count == 0);
+
+            outIsDeleted = new List<Boolean>();
+            outIsConflict = new List<Boolean>();
+            var newRev2a = rev1.CreateRevision();
+            newRev2a.SetUserProperties(properties2a);
+            var rev2a = newRev2a.Save();
+            Assert.AreEqual(rev2a.Id, database.WinningRevIDOfDoc(docNumericId, outIsDeleted, outIsConflict));
+            Assert.IsTrue(outIsConflict.Count == 0);
+
+            outIsDeleted = new List<Boolean>();
+            outIsConflict = new List<Boolean>();
+            var newRev2b = rev1.CreateRevision();
+            newRev2b.SetUserProperties(properties2b);
+            var rev2b = newRev2b.Save(true);
+            database.WinningRevIDOfDoc(docNumericId, outIsDeleted, outIsConflict);
+            Assert.IsTrue(outIsConflict.Count > 0);
         }
     }
 }

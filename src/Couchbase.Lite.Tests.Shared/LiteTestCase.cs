@@ -55,17 +55,18 @@ using Couchbase.Lite.Tests;
 using System.Threading.Tasks;
 using System.Linq;
 using System.Text;
+using System.Threading;
 
 namespace Couchbase.Lite
 {
     [TestFixture]
     public abstract class LiteTestCase
     {
-        public const string Tag = "LiteTestCase";
+        private const string Tag = "LiteTestCase";
 
         public const string FacebookAppId = "78255794086";
 
-        protected ObjectWriter mapper = new ObjectWriter();
+         ObjectWriter mapper = new ObjectWriter();
 
         protected Manager manager = null;
 
@@ -77,7 +78,7 @@ namespace Couchbase.Lite
         protected void SetUp()
         {
             Log.V(Tag, "SetUp");
-            ManagerOptions.Default.CallbackScheduler = TaskScheduler.Default;
+            ManagerOptions.Default.CallbackScheduler = new SingleTaskThreadpoolScheduler();
 
             LoadCustomProperties();
             StartCBLite();
@@ -95,7 +96,7 @@ namespace Couchbase.Lite
         protected DirectoryInfo GetRootDirectory()
         {
             var rootDirectoryPath = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-            var rootDirectory = new DirectoryInfo(Path.Combine(rootDirectoryPath, "couchbase/tests/files"));
+            var rootDirectory = new DirectoryInfo(Path.Combine(rootDirectoryPath, "couchbase", "tests", "files"));
             return rootDirectory;
         }
 
@@ -130,6 +131,12 @@ namespace Couchbase.Lite
 
         protected Database StartDatabase()
         {
+            if (database != null)
+            {
+                database.Close();
+                database.Delete();
+                database = null;
+            }
             database = EnsureEmptyDatabase(DefaultTestDb);
             return database;
         }
@@ -144,13 +151,14 @@ namespace Couchbase.Lite
 
         protected Database EnsureEmptyDatabase(string dbName)
         {
-            Database db = manager.GetExistingDatabase(dbName);
+            var db = manager.GetExistingDatabase(dbName);
             if (db != null)
             {
                 var status = false;;
 
                 try {
-                    db.Delete ();
+                    db.Delete();
+                    db.Close();
                     status = true;
                 } catch (Exception e) { 
                     Log.E(Tag, "Cannot delete database " + e.Message);
@@ -192,7 +200,7 @@ namespace Couchbase.Lite
 
         protected string GetReplicationServer()
         {
-            return Runtime.GetProperty("replicationServer");
+            return Runtime.GetProperty("replicationServer").Trim();
         }
 
         protected int GetReplicationPort()
@@ -465,9 +473,10 @@ namespace Couchbase.Lite
 
             var doc = CreateDocumentWithProperties(database, properties);
             var rev = doc.CurrentRevision;
+            var attachment = rev.GetAttachment(attachmentName);
             Assert.AreEqual(rev.Attachments.Count(), 0);
             Assert.AreEqual(rev.AttachmentNames.Count(), 0);
-            Assert.IsNull(rev.GetAttachment(attachmentName));
+            Assert.IsNull(attachment);
 
             var body = new ByteArrayInputStream(Encoding.UTF8.GetBytes(content));
             var rev2 = doc.CreateRevision();
@@ -477,28 +486,30 @@ namespace Couchbase.Lite
             Assert.AreEqual(rev3.Attachments.Count(), 1);
             Assert.AreEqual(rev3.AttachmentNames.Count(), 1);
 
-            var attach = rev3.GetAttachment(attachmentName);
-            Assert.IsNotNull(attach);
-            Assert.AreEqual(doc, attach.Document);
-            Assert.AreEqual(attachmentName, attach.Name);
+            attachment = rev3.GetAttachment(attachmentName);
+            Assert.IsNotNull(attachment);
+            Assert.AreEqual(doc, attachment.Document);
+            Assert.AreEqual(attachmentName, attachment.Name);
 
-            var attNames = new AList<string>();
+            var attNames = new List<string>();
             attNames.AddItem(attachmentName);
             Assert.AreEqual(rev3.AttachmentNames, attNames);
-            Assert.AreEqual("text/plain; charset=utf-8", attach.ContentType);
-            Assert.AreEqual(Encoding.UTF8.GetString(attach.Content.ToArray()), content);
-            Assert.AreEqual(Encoding.UTF8.GetBytes(content).Length, attach.Length);
+            Assert.AreEqual("text/plain; charset=utf-8", attachment.ContentType);
+            Assert.AreEqual(Encoding.UTF8.GetString(attachment.Content.ToArray()), content);
+            Assert.AreEqual(Encoding.UTF8.GetBytes(content).Length, attachment.Length);
+
+            attachment.Dispose();
             return doc;
         }          
             
         public void StopReplication(Replication replication)
         {
-            var replicationDoneSignal = new CountDownLatch(1);
+            var replicationDoneSignal = new CountdownEvent(1);
             var replicationStoppedObserver = new ReplicationObserver(replicationDoneSignal);
             replication.Changed += replicationStoppedObserver.Changed;
             replication.Stop();
 
-            var success = replicationDoneSignal.Await(TimeSpan.FromSeconds(30));
+            var success = replicationDoneSignal.Wait(TimeSpan.FromSeconds(30));
             Assert.IsTrue(success);
 
             // give a little padding to give it a chance to save a checkpoint
